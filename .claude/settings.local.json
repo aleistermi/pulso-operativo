@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:documentation.bamboohr.com)",
+      "Bash(pip install -r requirements.txt)",
+      "Bash(python fetch_timesheets.py --days 30)",
+      "Bash(python -c \"from dotenv import load_dotenv; import os; load_dotenv\\(\\); key=os.environ.get\\(''BAMBOOHR_API_KEY'',''''\\); print\\(f''Key length: {len\\(key\\)}''\\); print\\(f''Starts with: {key[:3]}...''\\); print\\(f''Subdomain: {os.environ.get\\(\"\"BAMBOOHR_SUBDOMAIN\"\"\\)}''\\)\")",
+      "Bash(streamlit run /Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/dashboard.py --server.port 8501)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501)",
+      "Bash(streamlit run /Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/dashboard.py --server.port 8501 --server.headless true)",
+      "Bash(python -c \":*)",
+      "Bash(python3 -c \":*)",
+      "Bash(pgrep -f \"streamlit run\")",
+      "Bash(python3 -c \"import json; data=json.load\\(open\\(''/Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/data/employees.json''\\)\\); print\\(list\\(data[0].keys\\(\\)\\)\\); print\\(f''{len\\(data\\)} employees''\\)\")",
+      "Bash(python3 -c \"import py_compile; py_compile.compile\\(''dashboard.py'', doraise=True\\)\")",
+      "Bash(pip3 install fpdf2)",
+      "Bash(git init)",
+      "Bash(git add -A)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
