@@ -326,7 +326,8 @@ with tab_overview:
     c1, c2 = st.columns(2)
 
     with c1:
-        n_top = st.slider("Top personas", min_value=5, max_value=min(40, n_employees), value=min(10, n_employees), key="top_n")
+        slider_max = max(5, min(40, n_employees))
+        n_top = st.slider("Top personas", min_value=1, max_value=slider_max, value=min(10, slider_max), key="top_n")
         by_emp = df_wd.groupby("employeeName")["hours"].sum().sort_values(ascending=True).tail(n_top).reset_index()
 
         fig_emp = go.Figure(go.Bar(
