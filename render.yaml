@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pulso-operativo
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run dashboard.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: BAMBOOHR_API_KEY
+        sync: false
+      - key: BAMBOOHR_SUBDOMAIN
+        sync: false
