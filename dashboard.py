@@ -18,6 +18,37 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "logos_entropia")
 st.set_page_config(page_title="Pulso Operativo", page_icon=os.path.join(LOGO_PATH, "Flor-negra (2).ico"), layout="wide")
 
+# ── Login gate ──
+def check_password():
+    """Simple shared password gate."""
+    if "authenticated" in st.session_state and st.session_state.authenticated:
+        return True
+
+    app_password = get_secret("APP_PASSWORD", "")
+    if not app_password:
+        return True  # No password configured, skip auth
+
+    st.markdown(
+        '<div style="max-width:400px;margin:80px auto;text-align:center;">'
+        '<h2 style="color:#0f172a;">Pulso Operativo</h2>'
+        '<p style="color:#64748b;">Ingresa el password para continuar</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        pwd = st.text_input("Password", type="password", key="login_pwd")
+        if st.button("Entrar", use_container_width=True):
+            if pwd == app_password:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Password incorrecto")
+    return False
+
+if not check_password():
+    st.stop()
+
 # ── Theme / palette ──
 SLATE = "#334155"
 STONE = "#78716c"
@@ -194,12 +225,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Sidebar: manual data refresh
-with st.sidebar:
-    if st.button("🔄 Actualizar datos", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-    st.caption("Datos en vivo de BambooHR · se actualizan cada hora automaticamente.")
 
 f1, f2, f3, f4 = st.columns([2, 2, 2, 2])
 
