@@ -3,11 +3,15 @@
 import io
 import os
 import json
+from datetime import date, timedelta
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+from bamboohr_client import BambooHRClient
+from config import get_bamboohr_credentials, get_secret
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -71,61 +75,94 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Load & enrich data ──
-@st.cache_data
-def load_data():
-    csv_path = os.path.join(DATA_DIR, "timesheet_entries.csv")
-    emp_path = os.path.join(DATA_DIR, "employees.json")
-    if not os.path.exists(csv_path):
-        return pd.DataFrame(), {}
+# ── Salary fetcher with fallback chain ──
+def _fetch_salaries(client: BambooHRClient) -> list[dict]:
+    """Try to get salary data from API, then secrets, then local file."""
+    # Option 1: BambooHR custom report API
+    try:
+        return client.get_salary_report()
+    except Exception:
+        pass
 
-    df = pd.read_csv(csv_path)
+    # Option 2: Streamlit secrets (JSON string)
+    try:
+        salaries_json = get_secret("SALARIES_JSON")
+        if salaries_json:
+            return json.loads(salaries_json)
+    except Exception:
+        pass
+
+    # Option 3: Local file fallback
+    sal_path = os.path.join(DATA_DIR, "salaries.json")
+    if os.path.exists(sal_path):
+        with open(sal_path) as f:
+            return json.load(f)
+
+    return []
+
+
+# ── Load & enrich data (live from BambooHR API) ──
+@st.cache_data(ttl=3600)
+def load_data(_days_back: int = 90):
+    """Fetch live data from BambooHR API with 1-hour cache."""
+    api_key, subdomain = get_bamboohr_credentials()
+    client = BambooHRClient(api_key, subdomain)
+
+    # 1. Employees
+    employees = client.get_employees()
+    emp_map = {str(e["id"]): e.get("displayName", f"Employee {e['id']}") for e in employees}
+    dept_map = {str(e["id"]): e.get("department") or "Sin departamento" for e in employees}
+
+    # 2. Timesheet entries
+    end_date = date.today()
+    start_date = end_date - timedelta(days=_days_back)
+    entries = client.get_timesheet_entries(start_date.isoformat(), end_date.isoformat())
+
+    if not entries:
+        return pd.DataFrame(), {}, employees
+
+    df = pd.json_normalize(entries)
+    if "employeeId" in df.columns:
+        df["employeeName"] = df["employeeId"].astype(str).map(emp_map).fillna("Unknown")
+
+    # Date enrichment
     df["date"] = pd.to_datetime(df["date"])
     df["week"] = df["date"].dt.isocalendar().week.astype(int)
     df["week_start"] = df["date"].dt.to_period("W").apply(lambda p: p.start_time)
     df["weekday"] = df["date"].dt.day_name()
     df["is_weekday"] = df["date"].dt.dayofweek < 5
     df["project"] = df["projectInfo.project.name"].fillna("Sin proyecto")
-
-    dept_map = {}
-    if os.path.exists(emp_path):
-        with open(emp_path) as f:
-            employees = json.load(f)
-        dept_map = {str(e["id"]): e.get("department") or "Sin departamento" for e in employees}
-
     df["department"] = df["employeeId"].astype(str).map(dept_map).fillna("Sin departamento")
 
     # Descontar 1 hr de comida en entries de 6+ hrs
     df["hours_raw"] = df["hours"]
     df["hours"] = df["hours"].apply(lambda h: max(h - 1, 0) if h >= 6 else h)
 
-    # Salary & hourly cost
-    sal_path = os.path.join(DATA_DIR, "salaries.json")
+    # 3. Salary & hourly cost
+    salaries = _fetch_salaries(client)
     hourly_map = {}
-    if os.path.exists(sal_path):
-        with open(sal_path) as f:
-            salaries = json.load(f)
-        for e in salaries:
-            rate_str = (e.get("payRate") or "").strip()
-            try:
-                num = rate_str.replace(",", "").split()[0]
-                rate = float(num)
-            except (ValueError, IndexError):
-                rate = 0
-            if rate > 0:
-                hourly_map[str(e["id"])] = rate / 173.33
+    for e in salaries:
+        rate_str = (e.get("payRate") or "").strip()
+        try:
+            num = rate_str.replace(",", "").split()[0]
+            rate = float(num)
+        except (ValueError, IndexError):
+            rate = 0
+        if rate > 0:
+            hourly_map[str(e["id"])] = rate / 173.33
 
     df["hourly_rate"] = df["employeeId"].astype(str).map(hourly_map).fillna(0)
     df["cost"] = df["hours"] * df["hourly_rate"]
 
-    return df, dept_map
+    return df, dept_map, employees
 
 
 # No toolbar on any chart
 PLOTLY_CONFIG = {"displayModeBar": False}
 
 
-df_raw, dept_map = load_data()
+with st.spinner("Cargando datos de BambooHR..."):
+    df_raw, dept_map, all_employees_list = load_data()
 
 EXCLUDED_PEOPLE = {
     "Andrés Ponce de León Rosas", "Max Lugo Delgadillo", "Aleister Montfort Ibieta",
@@ -133,7 +170,7 @@ EXCLUDED_PEOPLE = {
 df_raw = df_raw[~df_raw["employeeName"].isin(EXCLUDED_PEOPLE)]
 
 if df_raw.empty:
-    st.warning("No hay datos. Corre `python fetch_timesheets.py` primero.")
+    st.warning("No hay datos de timesheet para el periodo seleccionado.")
     st.stop()
 
 
@@ -156,6 +193,13 @@ st.markdown(
     f'Pulso Operativo</div>',
     unsafe_allow_html=True,
 )
+
+# Sidebar: manual data refresh
+with st.sidebar:
+    if st.button("🔄 Actualizar datos", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.caption("Datos en vivo de BambooHR · se actualizan cada hora automaticamente.")
 
 f1, f2, f3, f4 = st.columns([2, 2, 2, 2])
 
@@ -195,8 +239,8 @@ st.divider()
 # ══════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════
-tab_overview, tab_person, tab_project, tab_dept, tab_costs, tab_report = st.tabs(
-    ["Overview", "Por Persona", "Por Proyecto", "Por Departamento", "Costos", "Reporte"]
+tab_overview, tab_person, tab_project, tab_dept, tab_costs, tab_assignments, tab_report = st.tabs(
+    ["Overview", "Por Persona", "Por Proyecto", "Por Departamento", "Costos", "Asignaciones", "Reporte"]
 )
 
 
@@ -695,7 +739,166 @@ with tab_costs:
 
 
 # ──────────────────────────────────────────────
-# TAB 6: REPORTE SEMANAL
+# TAB 6: ASIGNACIONES (Persona × Proyecto)
+# ──────────────────────────────────────────────
+with tab_assignments:
+    df_assigned = df_wd[df_wd["project"] != "Sin proyecto"]
+
+    if df_assigned.empty:
+        st.info("No hay datos de asignaciones a proyectos en este periodo.")
+    else:
+        # ── KPIs ──
+        proj_per_person = df_assigned.groupby("employeeName")["project"].nunique()
+        avg_proj = proj_per_person.mean()
+        max_proj_person = proj_per_person.idxmax()
+        max_proj_count = proj_per_person.max()
+        multi_proj_rate = (proj_per_person[proj_per_person > 1].count() / proj_per_person.count() * 100) if len(proj_per_person) > 0 else 0
+
+        ak1, ak2, ak3, ak4 = st.columns(4)
+        ak1.metric("Promedio proyectos / persona", f"{avg_proj:.1f}")
+        ak2.metric("Personas activas", proj_per_person.count())
+        ak3.metric("Mas proyectos", f"{max_proj_person}", delta=f"{max_proj_count} proyectos")
+        ak4.metric("Multi-proyecto", f"{multi_proj_rate:.0f}%", help="% de personas en mas de 1 proyecto")
+
+        st.markdown("")
+
+        # ── Filters: Person + Week for Treemap ──
+        tcol1, tcol2 = st.columns(2)
+        people_list = sorted(df_assigned["employeeName"].unique())
+        with tcol1:
+            selected_person_assign = st.selectbox(
+                "Persona", ["Todos"] + people_list, key="assign_person_select"
+            )
+        weeks_available = df_assigned.groupby("week_start").size().reset_index(name="n").sort_values("week_start", ascending=False)
+        week_labels_map = {row["week_start"].strftime("Semana del %d %b %Y"): row["week_start"] for _, row in weeks_available.iterrows()}
+        with tcol2:
+            selected_week_label_assign = st.selectbox(
+                "Semana", ["Todas"] + list(week_labels_map.keys()), key="assign_week_select"
+            )
+
+        # Filter data for treemap
+        tree_src = df_assigned.copy()
+        if selected_week_label_assign != "Todas":
+            tree_src = tree_src[tree_src["week_start"] == week_labels_map[selected_week_label_assign]]
+
+        title_parts = []
+        if selected_person_assign != "Todos":
+            tree_src = tree_src[tree_src["employeeName"] == selected_person_assign]
+            title_parts.append(selected_person_assign)
+        else:
+            title_parts.append("todas las personas")
+        if selected_week_label_assign != "Todas":
+            title_parts.append(selected_week_label_assign.lower())
+        else:
+            title_parts.append("todo el periodo")
+
+        tree_title = f"Distribucion de tiempo: {', '.join(title_parts)}"
+
+        if tree_src.empty:
+            st.info("No hay datos para la seleccion.")
+        else:
+            if selected_person_assign == "Todos":
+                tree_data = tree_src.groupby(["employeeName", "project"])["hours"].sum().reset_index()
+                fig_tree = px.treemap(
+                    tree_data, path=["employeeName", "project"], values="hours",
+                    title=tree_title,
+                    color_discrete_sequence=PALETTE,
+                )
+            else:
+                tree_data = tree_src.groupby("project")["hours"].sum().reset_index()
+                fig_tree = px.treemap(
+                    tree_data, path=["project"], values="hours",
+                    title=tree_title,
+                    color_discrete_sequence=PALETTE,
+                )
+
+            fig_tree.update_layout(
+                font=dict(family="Inter, system-ui, sans-serif", color="#334155"),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=40, b=10),
+            )
+            fig_tree.update_traces(
+                textinfo="label+value+percent parent",
+                textfont=dict(size=12),
+                hovertemplate="<b>%{label}</b><br>Horas: %{value:,.1f}<br>%{percentParent:.1%} del total<extra></extra>",
+            )
+            st.plotly_chart(fig_tree, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Stacked horizontal bar: hours per person colored by project ──
+        person_proj = df_assigned.groupby(["employeeName", "project"])["hours"].sum().reset_index()
+        person_totals = person_proj.groupby("employeeName")["hours"].sum().sort_values(ascending=True)
+        # Order: bottom=least, top=most (Plotly horizontal bars render bottom-up)
+        ordered_names = person_totals.index.tolist()
+
+        fig_stack = px.bar(
+            person_proj, x="hours", y="employeeName",
+            color="project", orientation="h",
+            title="Horas por persona (desglose por proyecto)",
+            color_discrete_sequence=PALETTE,
+            barmode="stack",
+        )
+        fig_stack.update_traces(
+            hovertemplate="%{data.name}: %{x:,.1f} hrs<extra></extra>",
+        )
+        fig_stack.update_layout(
+            **PLOTLY_LAYOUT, xaxis_title="Horas", yaxis_title="", legend_title="",
+            legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="left", x=0, font_size=11),
+            height=max(400, len(ordered_names) * 32),
+            yaxis=dict(categoryorder="array", categoryarray=ordered_names),
+        )
+        # Override unified hover from PLOTLY_LAYOUT — show only the hovered segment
+        fig_stack.update_layout(hovermode="closest")
+        st.plotly_chart(fig_stack, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Heatmap: Persona × Proyecto ──
+        import numpy as np
+        from scipy.cluster.hierarchy import linkage, leaves_list
+
+        heat_pp = df_assigned.groupby(["employeeName", "project"])["hours"].sum().reset_index()
+        heat_pivot = heat_pp.pivot_table(index="employeeName", columns="project", values="hours", fill_value=0)
+
+        # Hierarchical clustering for rows (people) to group similar profiles
+        if len(heat_pivot) > 2:
+            row_linkage = linkage(heat_pivot.values, method="ward")
+            row_order = leaves_list(row_linkage)
+            heat_pivot = heat_pivot.iloc[row_order]
+        # Cluster columns (projects) too
+        if len(heat_pivot.columns) > 2:
+            col_linkage = linkage(heat_pivot.values.T, method="ward")
+            col_order = leaves_list(col_linkage)
+            heat_pivot = heat_pivot.iloc[:, col_order]
+
+        # Replace zeros with NaN so they show as blank
+        heat_display = heat_pivot.replace(0, np.nan)
+
+        # Custom text: show value only where there's data
+        text_vals = np.where(heat_pivot.values > 0, np.vectorize(lambda v: f"{v:.1f}")(heat_pivot.values), "")
+
+        fig_heat_pp = go.Figure(data=go.Heatmap(
+            z=heat_display.values,
+            x=heat_display.columns.tolist(),
+            y=heat_display.index.tolist(),
+            text=text_vals,
+            texttemplate="%{text}",
+            textfont=dict(size=11),
+            colorscale=[[0, "#22c55e"], [0.5, "#facc15"], [1, "#ef4444"]],
+            hovertemplate="<b>%{y}</b><br>Proyecto: %{x}<br>Horas: %{z:,.1f}<extra></extra>",
+            showscale=True,
+            colorbar=dict(title="Horas"),
+        ))
+        fig_heat_pp.update_layout(
+            font=dict(family="Inter, system-ui, sans-serif", color="#334155"),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            title="Heatmap: Persona x Proyecto (horas)",
+            xaxis_title="", yaxis_title="",
+            xaxis=dict(side="bottom", tickangle=-45),
+            height=max(450, len(heat_pivot) * 32),
+        )
+        st.plotly_chart(fig_heat_pp, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+# ──────────────────────────────────────────────
+# TAB 7: REPORTE SEMANAL
 # ──────────────────────────────────────────────
 with tab_report:
     all_weeks = df_raw[df_raw["is_weekday"]].groupby("week_start").size().reset_index(name="entries").sort_values("week_start", ascending=False)
@@ -763,14 +966,9 @@ with tab_report:
         overtime_people = person_hrs[person_hrs > 40]
 
         # ── Missing reporters ──
-        emp_path = os.path.join(DATA_DIR, "employees.json")
-        missing_names = []
-        if os.path.exists(emp_path):
-            with open(emp_path) as f:
-                all_employees_list = json.load(f)
-            all_emp_names = {e.get("displayName", "") for e in all_employees_list}
-            active_names = set(dfw["employeeName"].unique())
-            missing_names = sorted(all_emp_names - active_names - {""} - EXCLUDED_PEOPLE)
+        all_emp_names = {e.get("displayName", "") for e in all_employees_list}
+        active_names = set(dfw["employeeName"].unique())
+        missing_names = sorted(all_emp_names - active_names - {""} - EXCLUDED_PEOPLE)
 
         # ── Hours by department ──
         dept_hrs = dfw.groupby("department").agg(

@@ -16,7 +16,20 @@
       "Bash(pip3 install fpdf2)",
       "Bash(git init)",
       "Bash(git add -A)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(chmod +x /Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/update_data.sh)",
+      "Bash(crontab -l)",
+      "Bash(launchctl load ~/Library/LaunchAgents/com.entropia.pulso-operativo.plist)",
+      "Bash(launchctl list)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(lsof -i :8501 -t)",
+      "Bash(lsof -i :8502 -t)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\(''/Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/data/salaries.json''\\)\\); print\\(f''Total entries: {len\\(d\\)}''\\); print\\(f''Fields: {list\\(d[0].keys\\(\\)\\)}''\\); print\\(f''Sample payRate values:''\\); [print\\(f''  {e[\"\"id\"\"]}: {e[\"\"payRate\"\"]}''\\) for e in d[:5]]\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\(''/Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/data/employees.json''\\)\\); print\\(f''Total: {len\\(d\\)}''\\); print\\(''Keys:'', list\\(d[0].keys\\(\\)\\)[:15]\\)\")",
+      "Bash(xargs kill)",
+      "Bash(gh auth status)",
+      "Bash(git add config.py bamboohr_client.py dashboard.py requirements.txt update_data.sh .claude/launch.json .claude/settings.local.json)"
     ]
   }
 }

@@ -48,3 +48,21 @@ class BambooHRClient:
         end = date.today()
         start = end - timedelta(days=days_back)
         return self.get_timesheet_entries(start.isoformat(), end.isoformat(), employee_ids)
+
+    def get_salary_report(self) -> list[dict]:
+        """Fetch pay rate data for all employees via custom report.
+
+        Returns:
+            List of dicts with keys: id, displayName, department,
+            payRate, payType, payPer.
+        """
+        url = f"{self.base_url}/reports/custom"
+        params = {"format": "JSON"}
+        payload = {
+            "title": "Salary Report",
+            "fields": ["id", "displayName", "department", "payRate", "payType", "payPer"],
+        }
+        resp = self.session.post(url, params=params, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("employees", [])
