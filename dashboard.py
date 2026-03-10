@@ -8,7 +8,11 @@ from datetime import date, timedelta
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
+
+# Force pure-Python JSON engine to avoid orjson circular-import bug
+pio.json.config.default_engine = "json"
 
 from bamboohr_client import BambooHRClient
 from config import get_bamboohr_credentials, get_secret
