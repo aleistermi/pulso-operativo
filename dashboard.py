@@ -339,6 +339,7 @@ with tab_overview:
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_emp.update_layout(
             **PLOTLY_LAYOUT,
@@ -360,6 +361,7 @@ with tab_overview:
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_proj.update_layout(
             **PLOTLY_LAYOUT,
@@ -375,6 +377,7 @@ with tab_overview:
         fig_daily = go.Figure(go.Bar(
             x=daily["date"], y=daily["hours"],
             marker_color=BAR_COLOR,
+            hovertemplate="<b>%{x|%d %b}</b><br>Horas: %{y:,.2f}<extra></extra>",
         ))
         fig_daily.update_layout(
             **PLOTLY_LAYOUT,
@@ -412,6 +415,7 @@ with tab_overview:
             marker_color=BAR_COLOR,
             name="Base (40 hrs)",
             showlegend=False,
+            hovertemplate="<b>%{y}</b><br>Base: 40 hrs<extra></extra>",
         ))
         fig_ot.add_trace(go.Bar(
             x=ot_count["excess"],
@@ -423,6 +427,7 @@ with tab_overview:
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Exceso: %{x:,.1f} hrs<extra></extra>",
         ))
         fig_ot.update_layout(
             **PLOTLY_LAYOUT,
@@ -476,6 +481,7 @@ with tab_person:
             textposition="outside",
             textfont=dict(size=12),
             cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
         ))
         fig_weekly.update_layout(
             **PLOTLY_LAYOUT,
@@ -497,6 +503,7 @@ with tab_person:
                 text=wd["hours"].apply(lambda x: f"{x:,.2f}"),
                 textposition="outside",
                 cliponaxis=False,
+                hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
             ))
             fig_wd.update_layout(**PLOTLY_LAYOUT, title="Horas por dia de la semana", xaxis_title="", yaxis_title="Horas")
             st.plotly_chart(fig_wd, use_container_width=True, config=PLOTLY_CONFIG)
@@ -512,6 +519,7 @@ with tab_person:
                     text=proj_person["hours"].apply(lambda x: f"{x:,.2f}"),
                     textposition="outside",
                     cliponaxis=False,
+                    hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
                 ))
                 fig_pp.update_layout(**PLOTLY_LAYOUT, title="Proyectos", yaxis_title="", xaxis_title="Horas")
                 st.plotly_chart(fig_pp, use_container_width=True, config=PLOTLY_CONFIG)
@@ -557,8 +565,12 @@ with tab_project:
             color_discrete_sequence=PALETTE,
             barmode="stack",
         )
+        fig_proj_stack.update_traces(
+            hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
+        )
         fig_proj_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(proj_weekly["week_label"].unique()) <= 2 else 0.2,
         )
@@ -573,6 +585,7 @@ with tab_project:
             text=by_contrib["hours"].apply(lambda x: f"{x:,.2f}"),
             textposition="outside",
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_contrib.update_layout(
             **PLOTLY_LAYOUT,
@@ -620,8 +633,12 @@ with tab_dept:
             color_discrete_sequence=PALETTE,
             barmode="stack",
         )
+        fig_dept_stack.update_traces(
+            hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
+        )
         fig_dept_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(dept_weekly["week_label"].unique()) <= 2 else 0.2,
         )
@@ -638,6 +655,7 @@ with tab_dept:
                 text=dept_by_emp["hours"].apply(lambda x: f"{x:,.2f}"),
                 textposition="outside",
                 cliponaxis=False,
+                hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
             ))
             fig_de.update_layout(**PLOTLY_LAYOUT, title="Horas por persona", yaxis_title="", xaxis_title="Horas",
                                  height=max(300, len(dept_by_emp) * 35))
@@ -653,6 +671,7 @@ with tab_dept:
                     text=dept_by_proj["hours"].apply(lambda x: f"{x:,.2f}"),
                     textposition="outside",
                     cliponaxis=False,
+                    hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
                 ))
                 fig_dp.update_layout(**PLOTLY_LAYOUT, title="Proyectos del departamento", yaxis_title="", xaxis_title="Horas",
                                      height=max(300, len(dept_by_proj) * 35))
@@ -859,6 +878,16 @@ with tab_assignments:
                 hovertemplate="<b>%{label}</b><br>Horas: %{value:,.2f}<br>%{percentParent:.1%} del total<extra></extra>",
             )
             st.plotly_chart(fig_tree, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Person × Project assignment table ──
+        assign_table = df_assigned.groupby("employeeName")["project"].apply(
+            lambda x: ", ".join(sorted(x.unique()))
+        ).reset_index()
+        assign_table.columns = ["Persona", "Proyectos"]
+        assign_table["# Proyectos"] = assign_table["Proyectos"].apply(lambda x: len(x.split(", ")))
+        assign_table = assign_table.sort_values("# Proyectos", ascending=False)
+        st.markdown("#### Asignaciones por persona")
+        st.dataframe(assign_table[["Persona", "# Proyectos", "Proyectos"]], use_container_width=True, hide_index=True)
 
         # ── Stacked horizontal bar: hours per person colored by project ──
         person_proj = df_assigned.groupby(["employeeName", "project"])["hours"].sum().reset_index()
