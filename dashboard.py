@@ -283,7 +283,7 @@ with tab_overview:
     k1.metric("Horas totales", f"{total_hours:,.0f}")
     k2.metric("Personas activas", n_employees)
     k3.metric("Proyectos", n_projects)
-    k4.metric("Promedio hrs / persona", f"{avg_per_emp:,.1f}")
+    k4.metric("Promedio hrs / persona", f"{avg_per_emp:,.2f}")
 
     st.markdown("")
 
@@ -312,7 +312,7 @@ with tab_overview:
         textposition="outside",
         textfont=dict(size=12, color=SLATE),
         cliponaxis=False,
-        hovertemplate="<b>%{x}</b><br>Horas: %{y:,.1f}<extra></extra>",
+        hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
     ))
     fig_weeks.update_layout(
         **PLOTLY_LAYOUT,
@@ -335,10 +335,11 @@ with tab_overview:
             y=by_emp["employeeName"],
             orientation="h",
             marker_color=BAR_COLOR,
-            text=by_emp["hours"].apply(lambda x: f"{x:,.1f}"),
+            text=by_emp["hours"].apply(lambda x: f"{x:,.2f}"),
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_emp.update_layout(
             **PLOTLY_LAYOUT,
@@ -356,10 +357,11 @@ with tab_overview:
             y=by_proj["project"],
             orientation="h",
             marker_color=BAR_COLOR,
-            text=by_proj["hours"].apply(lambda x: f"{x:,.1f}"),
+            text=by_proj["hours"].apply(lambda x: f"{x:,.2f}"),
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_proj.update_layout(
             **PLOTLY_LAYOUT,
@@ -375,6 +377,7 @@ with tab_overview:
         fig_daily = go.Figure(go.Bar(
             x=daily["date"], y=daily["hours"],
             marker_color=BAR_COLOR,
+            hovertemplate="<b>%{x|%d %b}</b><br>Horas: %{y:,.2f}<extra></extra>",
         ))
         fig_daily.update_layout(
             **PLOTLY_LAYOUT,
@@ -412,6 +415,7 @@ with tab_overview:
             marker_color=BAR_COLOR,
             name="Base (40 hrs)",
             showlegend=False,
+            hovertemplate="<b>%{y}</b><br>Base: 40 hrs<extra></extra>",
         ))
         fig_ot.add_trace(go.Bar(
             x=ot_count["excess"],
@@ -423,6 +427,7 @@ with tab_overview:
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Exceso: %{x:,.1f} hrs<extra></extra>",
         ))
         fig_ot.update_layout(
             **PLOTLY_LAYOUT,
@@ -459,9 +464,9 @@ with tab_person:
 
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Departamento", dept)
-        p2.metric("Horas totales", f"{total_p:,.1f}")
+        p2.metric("Horas totales", f"{total_p:,.2f}")
         p3.metric("Dias activos", days_active)
-        p4.metric("Promedio diario", f"{avg_daily:,.1f} hrs")
+        p4.metric("Promedio diario", f"{avg_daily:,.2f} hrs")
 
         st.markdown("")
 
@@ -472,10 +477,11 @@ with tab_person:
         fig_weekly = go.Figure(go.Bar(
             x=weekly["week_label"], y=weekly["hours"],
             marker_color=BAR_COLOR,
-            text=weekly["hours"].apply(lambda x: f"{x:,.1f}"),
+            text=weekly["hours"].apply(lambda x: f"{x:,.2f}"),
             textposition="outside",
             textfont=dict(size=12),
             cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
         ))
         fig_weekly.update_layout(
             **PLOTLY_LAYOUT,
@@ -494,9 +500,10 @@ with tab_person:
             fig_wd = go.Figure(go.Bar(
                 x=wd["weekday"], y=wd["hours"],
                 marker_color=BAR_COLOR,
-                text=wd["hours"].apply(lambda x: f"{x:,.1f}"),
+                text=wd["hours"].apply(lambda x: f"{x:,.2f}"),
                 textposition="outside",
                 cliponaxis=False,
+                hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
             ))
             fig_wd.update_layout(**PLOTLY_LAYOUT, title="Horas por dia de la semana", xaxis_title="", yaxis_title="Horas")
             st.plotly_chart(fig_wd, use_container_width=True, config=PLOTLY_CONFIG)
@@ -509,9 +516,10 @@ with tab_person:
                     x=proj_person["hours"], y=proj_person["project"],
                     orientation="h",
                     marker_color=BAR_COLOR,
-                    text=proj_person["hours"].apply(lambda x: f"{x:,.1f}"),
+                    text=proj_person["hours"].apply(lambda x: f"{x:,.2f}"),
                     textposition="outside",
                     cliponaxis=False,
+                    hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
                 ))
                 fig_pp.update_layout(**PLOTLY_LAYOUT, title="Proyectos", yaxis_title="", xaxis_title="Horas")
                 st.plotly_chart(fig_pp, use_container_width=True, config=PLOTLY_CONFIG)
@@ -540,7 +548,7 @@ with tab_project:
         proj_days = df_proj["date"].nunique()
 
         pr1, pr2, pr3 = st.columns(3)
-        pr1.metric("Horas totales", f"{total_proj:,.1f}")
+        pr1.metric("Horas totales", f"{total_proj:,.2f}")
         pr2.metric("Contribuidores", n_contributors)
         pr3.metric("Dias con actividad", proj_days)
 
@@ -557,8 +565,12 @@ with tab_project:
             color_discrete_sequence=PALETTE,
             barmode="stack",
         )
+        fig_proj_stack.update_traces(
+            hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
+        )
         fig_proj_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(proj_weekly["week_label"].unique()) <= 2 else 0.2,
         )
@@ -570,9 +582,10 @@ with tab_project:
             x=by_contrib["hours"], y=by_contrib["employeeName"],
             orientation="h",
             marker_color=BAR_COLOR,
-            text=by_contrib["hours"].apply(lambda x: f"{x:,.1f}"),
+            text=by_contrib["hours"].apply(lambda x: f"{x:,.2f}"),
             textposition="outside",
             cliponaxis=False,
+            hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
         ))
         fig_contrib.update_layout(
             **PLOTLY_LAYOUT,
@@ -603,7 +616,7 @@ with tab_dept:
         n_proj_d = df_dept[df_dept["project"] != "Sin proyecto"]["project"].nunique()
 
         d1, d2, d3 = st.columns(3)
-        d1.metric("Horas totales", f"{total_d:,.1f}")
+        d1.metric("Horas totales", f"{total_d:,.2f}")
         d2.metric("Personas", n_emp_d)
         d3.metric("Proyectos", n_proj_d)
 
@@ -620,8 +633,12 @@ with tab_dept:
             color_discrete_sequence=PALETTE,
             barmode="stack",
         )
+        fig_dept_stack.update_traces(
+            hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
+        )
         fig_dept_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(dept_weekly["week_label"].unique()) <= 2 else 0.2,
         )
@@ -635,9 +652,10 @@ with tab_dept:
                 x=dept_by_emp["hours"], y=dept_by_emp["employeeName"],
                 orientation="h",
                 marker_color=BAR_COLOR,
-                text=dept_by_emp["hours"].apply(lambda x: f"{x:,.1f}"),
+                text=dept_by_emp["hours"].apply(lambda x: f"{x:,.2f}"),
                 textposition="outside",
                 cliponaxis=False,
+                hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
             ))
             fig_de.update_layout(**PLOTLY_LAYOUT, title="Horas por persona", yaxis_title="", xaxis_title="Horas",
                                  height=max(300, len(dept_by_emp) * 35))
@@ -650,9 +668,10 @@ with tab_dept:
                     x=dept_by_proj["hours"], y=dept_by_proj["project"],
                     orientation="h",
                     marker_color=BAR_COLOR,
-                    text=dept_by_proj["hours"].apply(lambda x: f"{x:,.1f}"),
+                    text=dept_by_proj["hours"].apply(lambda x: f"{x:,.2f}"),
                     textposition="outside",
                     cliponaxis=False,
+                    hovertemplate="<b>%{y}</b><br>Horas: %{x:,.2f}<extra></extra>",
                 ))
                 fig_dp.update_layout(**PLOTLY_LAYOUT, title="Proyectos del departamento", yaxis_title="", xaxis_title="Horas",
                                      height=max(300, len(dept_by_proj) * 35))
@@ -672,7 +691,10 @@ with tab_dept:
                 heat_pivot, aspect="auto",
                 color_continuous_scale=["#e2e8f0", "#1e40af", "#0f172a"],
                 title="Heatmap: Persona x Dia",
-                text_auto=".1f",
+                text_auto=".2f",
+            )
+            fig_heat.update_traces(
+                hovertemplate="<b>%{y}</b><br>%{x}: %{z:.2f} hrs<extra></extra>",
             )
             fig_heat.update_layout(
                 **PLOTLY_LAYOUT, xaxis_title="", yaxis_title="",
@@ -714,6 +736,7 @@ with tab_costs:
             textposition="outside",
             textfont=dict(size=12),
             cliponaxis=False,
+            hovertemplate="<b>%{x}</b><br>Costo: $%{y:,.0f}<extra></extra>",
         ))
         fig_wc.update_layout(
             **PLOTLY_LAYOUT,
@@ -733,6 +756,7 @@ with tab_costs:
                 textposition="outside",
                 textfont=dict(size=11),
                 cliponaxis=False,
+                hovertemplate="<b>%{y}</b><br>Costo: $%{x:,.0f}<extra></extra>",
             ))
             fig_cp.update_layout(
                 **PLOTLY_LAYOUT,
@@ -756,8 +780,12 @@ with tab_costs:
                 color_discrete_sequence=PALETTE,
                 barmode="stack",
             )
+            fig_pwc.update_traces(
+                hovertemplate="<b>%{data.name}</b><br>Costo: $%{y:,.0f}<extra></extra>",
+            )
             fig_pwc.update_layout(
                 **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="MXN", legend_title="",
+                hovermode="closest",
                 legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
                 bargap=0.5 if len(proj_weekly_cost["week_label"].unique()) <= 2 else 0.2,
             )
@@ -845,10 +873,21 @@ with tab_assignments:
             )
             fig_tree.update_traces(
                 textinfo="label+value+percent parent",
+                texttemplate="%{label}<br>%{value:,.2f}<br>%{percentParent:.1%}",
                 textfont=dict(size=12),
-                hovertemplate="<b>%{label}</b><br>Horas: %{value:,.1f}<br>%{percentParent:.1%} del total<extra></extra>",
+                hovertemplate="<b>%{label}</b><br>Horas: %{value:,.2f}<br>%{percentParent:.1%} del total<extra></extra>",
             )
             st.plotly_chart(fig_tree, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Person × Project assignment table ──
+        assign_table = df_assigned.groupby("employeeName")["project"].apply(
+            lambda x: ", ".join(sorted(x.unique()))
+        ).reset_index()
+        assign_table.columns = ["Persona", "Proyectos"]
+        assign_table["# Proyectos"] = assign_table["Proyectos"].apply(lambda x: len(x.split(", ")))
+        assign_table = assign_table.sort_values("# Proyectos", ascending=False)
+        st.markdown("#### Asignaciones por persona")
+        st.dataframe(assign_table[["Persona", "# Proyectos", "Proyectos"]], use_container_width=True, hide_index=True)
 
         # ── Stacked horizontal bar: hours per person colored by project ──
         person_proj = df_assigned.groupby(["employeeName", "project"])["hours"].sum().reset_index()
@@ -864,7 +903,7 @@ with tab_assignments:
             barmode="stack",
         )
         fig_stack.update_traces(
-            hovertemplate="%{data.name}: %{x:,.1f} hrs<extra></extra>",
+            hovertemplate="%{data.name}: %{x:,.2f} hrs<extra></extra>",
         )
         fig_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Horas", yaxis_title="", legend_title="",
@@ -908,7 +947,7 @@ with tab_assignments:
             texttemplate="%{text}",
             textfont=dict(size=11),
             colorscale=[[0, "#22c55e"], [0.5, "#facc15"], [1, "#ef4444"]],
-            hovertemplate="<b>%{y}</b><br>Proyecto: %{x}<br>Horas: %{z:,.1f}<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>Proyecto: %{x}<br>Horas: %{z:,.2f}<extra></extra>",
             showscale=True,
             colorbar=dict(title="Horas"),
         ))
@@ -961,7 +1000,7 @@ with tab_report:
             arrow = "+" if d > 0 else ""
             return f" ({arrow}{d:.1f}%)"
 
-        # Tasa de asignacion
+        # % hrs con proyecto
         hrs_with_proj = dfw[dfw["project"] != "Sin proyecto"]["hours"].sum()
         assign_rate = (hrs_with_proj / w_hours * 100) if w_hours > 0 else 0
         p_hrs_with_proj = dfp[dfp["project"] != "Sin proyecto"]["hours"].sum() if not dfp.empty else 0
@@ -1006,6 +1045,20 @@ with tab_report:
             dhp = dfp.groupby("department")["hours"].sum()
             dept_hrs_prev = dhp.to_dict()
 
+        # ── Sin proyecto breakdown ──
+        sin_proy = dfw[dfw["project"] == "Sin proyecto"]
+        sin_proy_hrs = sin_proy["hours"].sum()
+        sin_proy_pct = (sin_proy_hrs / w_hours * 100) if w_hours > 0 else 0
+        sin_proy_by_person = sin_proy.groupby("employeeName")["hours"].sum().sort_values(ascending=False)
+        person_total_hrs = dfw.groupby("employeeName")["hours"].sum()
+        sin_proy_detail = []
+        for name, hrs in sin_proy_by_person.items():
+            total = person_total_hrs.get(name, hrs)
+            pct = (hrs / total * 100) if total > 0 else 0
+            sin_proy_detail.append((name, hrs, pct))
+        # People with 100% sin proyecto
+        sin_proy_100 = [d for d in sin_proy_detail if d[2] >= 99.9]
+
         # ══════════════════════════════════════
         # RENDER REPORT
         # ══════════════════════════════════════
@@ -1015,8 +1068,8 @@ with tab_report:
         rk1.metric("Horas totales", f"{w_hours:,.0f}", delta=f"{((w_hours-p_hours)/p_hours*100):+.1f}%" if p_hours > 0 else None)
         rk2.metric("Costo total", f"${w_cost:,.0f}", delta=f"{((w_cost-p_cost)/p_cost*100):+.1f}%" if p_cost > 0 else None)
         rk3.metric("Personas activas", w_people, delta=f"{w_people - p_people:+d}" if p_people > 0 else None)
-        rk4.metric("Promedio hrs/persona", f"{w_avg_per_person:,.1f}", delta=f"{((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}%" if p_avg_per_person > 0 else None)
-        rk5.metric("Tasa de asignacion", f"{assign_rate:.0f}%", delta=f"{assign_rate - p_assign_rate:+.1f}pp" if p_hours > 0 else None)
+        rk4.metric("Promedio hrs/persona", f"{w_avg_per_person:,.2f}", delta=f"{((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}%" if p_avg_per_person > 0 else None)
+        rk5.metric("% hrs con proyecto", f"{assign_rate:.0f}%", delta=f"{assign_rate - p_assign_rate:+.1f}pp" if p_hours > 0 else None)
 
         st.markdown("")
 
@@ -1034,8 +1087,8 @@ with tab_report:
         report_lines.append(f"| Horas totales | {w_hours:,.0f} | {p_hours:,.0f} | {((w_hours-p_hours)/p_hours*100):+.1f}% |" if p_hours > 0 else f"| Horas totales | {w_hours:,.0f} | — | — |")
         report_lines.append(f"| Costo total | ${w_cost:,.0f} | ${p_cost:,.0f} | {((w_cost-p_cost)/p_cost*100):+.1f}% |" if p_cost > 0 else f"| Costo total | ${w_cost:,.0f} | — | — |")
         report_lines.append(f"| Personas activas | {w_people} | {p_people} | {w_people - p_people:+d} |" if p_people > 0 else f"| Personas activas | {w_people} | — | — |")
-        report_lines.append(f"| Promedio hrs/persona | {w_avg_per_person:,.1f} | {p_avg_per_person:,.1f} | {((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}% |" if p_avg_per_person > 0 else f"| Promedio hrs/persona | {w_avg_per_person:,.1f} | — | — |")
-        report_lines.append(f"| Tasa de asignacion | {assign_rate:.0f}% | {p_assign_rate:.0f}% | {assign_rate - p_assign_rate:+.1f}pp |" if p_hours > 0 else f"| Tasa de asignacion | {assign_rate:.0f}% | — | — |")
+        report_lines.append(f"| Promedio hrs/persona | {w_avg_per_person:,.2f} | {p_avg_per_person:,.2f} | {((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}% |" if p_avg_per_person > 0 else f"| Promedio hrs/persona | {w_avg_per_person:,.2f} | — | — |")
+        report_lines.append(f"| % hrs con proyecto | {assign_rate:.0f}% | {p_assign_rate:.0f}% | {assign_rate - p_assign_rate:+.1f}pp |" if p_hours > 0 else f"| % hrs con proyecto | {assign_rate:.0f}% | — | — |")
         report_lines.append(f"| Proyectos activos | {w_projects} | — | — |")
         report_lines.append("")
 
@@ -1052,7 +1105,7 @@ with tab_report:
                     delta = f"{d:+.1f}%"
                 else:
                     delta = "nuevo" if prev_c == 0 else "—"
-                report_lines.append(f"| {r['project']} | ${r['cost']:,.0f} | {r['hours']:,.1f} | {int(r['people'])} | {delta} |")
+                report_lines.append(f"| {r['project']} | ${r['cost']:,.0f} | {r['hours']:,.2f} | {int(r['people'])} | {delta} |")
         else:
             report_lines.append("Sin datos de costo")
         report_lines.append("")
@@ -1070,7 +1123,7 @@ with tab_report:
                     delta = f"{d:+.1f}%"
                 else:
                     delta = "nuevo"
-                report_lines.append(f"| {r['project']} | {r['hours']:,.1f} | {int(r['people'])} | {delta} |")
+                report_lines.append(f"| {r['project']} | {r['hours']:,.2f} | {int(r['people'])} | {delta} |")
         report_lines.append("")
 
         # Department breakdown
@@ -1086,7 +1139,7 @@ with tab_report:
                     delta = f"{d:+.1f}%"
                 else:
                     delta = "—"
-                report_lines.append(f"| {r['department']} | {r['hours']:,.1f} | {int(r['people'])} | {delta} |")
+                report_lines.append(f"| {r['department']} | {r['hours']:,.2f} | {int(r['people'])} | {delta} |")
             report_lines.append("")
 
         # Overtime
@@ -1096,7 +1149,7 @@ with tab_report:
             report_lines.append("| Persona | Horas | Exceso |")
             report_lines.append("|:--|--:|--:|")
             for name, hrs in overtime_people.items():
-                report_lines.append(f"| {name} | {hrs:,.1f} | +{hrs - 40:,.1f} |")
+                report_lines.append(f"| {name} | {hrs:,.2f} | +{hrs - 40:,.2f} |")
             report_lines.append("")
 
         # Missing
@@ -1105,6 +1158,22 @@ with tab_report:
             report_lines.append("")
             # Show as comma-separated to save space
             report_lines.append(", ".join(missing_names))
+            report_lines.append("")
+
+        # Sin proyecto
+        if sin_proy_hrs > 0:
+            report_lines.append(f"## Sin proyecto ({sin_proy_pct:.0f}% de horas)")
+            report_lines.append("")
+            report_lines.append(f"**{sin_proy_hrs:,.2f}** de {w_hours:,.0f} horas no tienen proyecto asignado.")
+            report_lines.append("")
+            if sin_proy_100:
+                report_lines.append(f"**100% sin proyecto ({len(sin_proy_100)}):** {', '.join(d[0] for d in sin_proy_100)}")
+                report_lines.append("")
+            # Top offenders table (show all with sin proyecto hours)
+            report_lines.append("| Persona | Hrs sin proyecto | % sin proyecto |")
+            report_lines.append("|:--|--:|--:|")
+            for name, hrs, pct in sin_proy_detail[:15]:
+                report_lines.append(f"| {name} | {hrs:,.2f} | {pct:.0f}% |")
             report_lines.append("")
 
         report_lines.append("---")
@@ -1184,8 +1253,8 @@ with tab_report:
                 ("Horas totales", f"{w_hours:,.0f}"),
                 ("Costo total", f"${w_cost:,.0f}"),
                 ("Personas", str(w_people)),
-                ("Prom hrs/persona", f"{w_avg_per_person:,.1f}"),
-                ("Asignacion", f"{assign_rate:.0f}%"),
+                ("Prom hrs/persona", f"{w_avg_per_person:,.2f}"),
+                ("% hrs con proyecto", f"{assign_rate:.0f}%"),
             ]
             box_w = 36
             x_start = 10
@@ -1220,13 +1289,13 @@ with tab_report:
             else:
                 snapshot_rows.append(["Personas activas", str(w_people), "—", "—"])
             if p_avg_per_person > 0:
-                snapshot_rows.append(["Prom hrs/persona", f"{w_avg_per_person:,.1f}", f"{p_avg_per_person:,.1f}", f"{((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}%"])
+                snapshot_rows.append(["Prom hrs/persona", f"{w_avg_per_person:,.2f}", f"{p_avg_per_person:,.2f}", f"{((w_avg_per_person-p_avg_per_person)/p_avg_per_person*100):+.1f}%"])
             else:
-                snapshot_rows.append(["Prom hrs/persona", f"{w_avg_per_person:,.1f}", "—", "—"])
+                snapshot_rows.append(["Prom hrs/persona", f"{w_avg_per_person:,.2f}", "—", "—"])
             if p_hours > 0:
-                snapshot_rows.append(["Tasa asignacion", f"{assign_rate:.0f}%", f"{p_assign_rate:.0f}%", f"{assign_rate - p_assign_rate:+.1f}pp"])
+                snapshot_rows.append(["% hrs con proyecto", f"{assign_rate:.0f}%", f"{p_assign_rate:.0f}%", f"{assign_rate - p_assign_rate:+.1f}pp"])
             else:
-                snapshot_rows.append(["Tasa asignacion", f"{assign_rate:.0f}%", "—", "—"])
+                snapshot_rows.append(["% hrs con proyecto", f"{assign_rate:.0f}%", "—", "—"])
             pdf.add_table(["Indicador", "Esta semana", "Anterior", "Cambio"], snapshot_rows, [60, 45, 45, 40])
 
             # Cost by project
@@ -1236,7 +1305,7 @@ with tab_report:
                 for _, r in proj_cost_curr.iterrows():
                     prev_c = proj_cost_prev.get(r["project"], 0)
                     delta = f"{((r['cost'] - prev_c) / prev_c * 100):+.1f}%" if prev_c > 0 else "nuevo"
-                    cost_rows.append([r["project"], f"${r['cost']:,.0f}", f"{r['hours']:,.1f}", str(int(r["people"])), delta])
+                    cost_rows.append([r["project"], f"${r['cost']:,.0f}", f"{r['hours']:,.2f}", str(int(r["people"])), delta])
                 pdf.add_table(["Proyecto", "Costo", "Horas", "Personas", "vs Ant."], cost_rows, [60, 35, 30, 30, 35])
 
             # Hours by project
@@ -1246,7 +1315,7 @@ with tab_report:
                 for _, r in proj_hrs_curr.iterrows():
                     prev_h = proj_hrs_prev.get(r["project"], 0)
                     delta = f"{((r['hours'] - prev_h) / prev_h * 100):+.1f}%" if prev_h > 0 else "nuevo"
-                    hrs_rows.append([r["project"], f"{r['hours']:,.1f}", str(int(r["people"])), delta])
+                    hrs_rows.append([r["project"], f"{r['hours']:,.2f}", str(int(r["people"])), delta])
                 pdf.add_table(["Proyecto", "Horas", "Personas", "vs Ant."], hrs_rows, [70, 40, 40, 40])
 
             # Department
@@ -1256,13 +1325,13 @@ with tab_report:
                 for _, r in dept_hrs.iterrows():
                     prev_dh = dept_hrs_prev.get(r["department"], 0)
                     delta = f"{((r['hours'] - prev_dh) / prev_dh * 100):+.1f}%" if prev_dh > 0 else "—"
-                    dept_rows.append([r["department"], f"{r['hours']:,.1f}", str(int(r["people"])), delta])
+                    dept_rows.append([r["department"], f"{r['hours']:,.2f}", str(int(r["people"])), delta])
                 pdf.add_table(["Departamento", "Horas", "Personas", "vs Ant."], dept_rows, [70, 40, 40, 40])
 
             # Overtime
             if not overtime_people.empty:
                 pdf.section_title(f"Overtime +40 hrs ({len(overtime_people)} personas)")
-                ot_rows = [[name, f"{hrs:,.1f}", f"+{hrs - 40:,.1f}"] for name, hrs in overtime_people.items()]
+                ot_rows = [[name, f"{hrs:,.2f}", f"+{hrs - 40:,.2f}"] for name, hrs in overtime_people.items()]
                 pdf.add_table(["Persona", "Horas", "Exceso"], ot_rows, [90, 50, 50])
 
             # Missing
@@ -1271,6 +1340,25 @@ with tab_report:
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(71, 85, 105)
                 pdf.multi_cell(190, 5, ", ".join(missing_names))
+
+            # Sin proyecto
+            if sin_proy_hrs > 0:
+                pdf.ln(4)
+                pdf.section_title(f"Sin proyecto ({sin_proy_pct:.0f}% de horas)")
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(71, 85, 105)
+                pdf.cell(0, 6, f"{sin_proy_hrs:,.2f} de {w_hours:,.0f} horas no tienen proyecto asignado.")
+                pdf.ln(8)
+                if sin_proy_100:
+                    pdf.set_font("Helvetica", "B", 8)
+                    pdf.set_text_color(51, 65, 85)
+                    pdf.cell(0, 5, f"100% sin proyecto ({len(sin_proy_100)}):")
+                    pdf.ln(5)
+                    pdf.set_font("Helvetica", "", 8)
+                    pdf.multi_cell(190, 5, ", ".join(d[0] for d in sin_proy_100))
+                    pdf.ln(4)
+                sp_rows = [[name, f"{hrs:,.2f}", f"{pct:.0f}%"] for name, hrs, pct in sin_proy_detail[:15]]
+                pdf.add_table(["Persona", "Hrs sin proyecto", "% sin proyecto"], sp_rows, [90, 50, 50])
 
             buf = io.BytesIO()
             pdf.output(buf)

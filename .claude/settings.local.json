@@ -29,7 +29,14 @@
       "Bash(python3 -c \"import json; d=json.load\\(open\\(''/Users/aleistermontfort/Documentos_HD/TIMESHEET_ANALYTICS/data/employees.json''\\)\\); print\\(f''Total: {len\\(d\\)}''\\); print\\(''Keys:'', list\\(d[0].keys\\(\\)\\)[:15]\\)\")",
       "Bash(xargs kill)",
       "Bash(gh auth status)",
-      "Bash(git add config.py bamboohr_client.py dashboard.py requirements.txt update_data.sh .claude/launch.json .claude/settings.local.json)"
+      "Bash(git add config.py bamboohr_client.py dashboard.py requirements.txt update_data.sh .claude/launch.json .claude/settings.local.json)",
+      "Bash(git checkout main)",
+      "Bash(gh api repos/aleistermi/pulso-operativo/transfer -f new_owner=\"Entropia-AI\" --method POST)",
+      "Bash(git remote set-url origin https://github.com/Entropia-AI/pulso-operativo.git)",
+      "Bash(gh api repos/Entropia-AI/pulso-operativo/transfer -f new_owner=\"aleistermi\" --method POST --jq '.full_name')",
+      "Bash(git remote set-url origin https://github.com/aleistermi/pulso-operativo.git)",
+      "Bash(gh api repos/aleistermi/pulso-operativo --jq '.full_name + \"\" | private: \"\" + \\(.private|tostring\\)')",
+      "Bash(git add dashboard.py)"
     ]
   }
 }
