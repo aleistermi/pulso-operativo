@@ -570,10 +570,10 @@ with tab_project:
         )
         fig_proj_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
-            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(proj_weekly["week_label"].unique()) <= 2 else 0.2,
         )
+        fig_proj_stack.update_layout(hovermode="closest")
         st.plotly_chart(fig_proj_stack, use_container_width=True, config=PLOTLY_CONFIG)
 
         # Hours per contributor (horizontal bar)
@@ -638,10 +638,10 @@ with tab_dept:
         )
         fig_dept_stack.update_layout(
             **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
-            hovermode="closest",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
             bargap=0.5 if len(dept_weekly["week_label"].unique()) <= 2 else 0.2,
         )
+        fig_dept_stack.update_layout(hovermode="closest")
         st.plotly_chart(fig_dept_stack, use_container_width=True, config=PLOTLY_CONFIG)
 
         dc1, dc2 = st.columns(2)
@@ -785,10 +785,10 @@ with tab_costs:
             )
             fig_pwc.update_layout(
                 **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="MXN", legend_title="",
-                hovermode="closest",
                 legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
                 bargap=0.5 if len(proj_weekly_cost["week_label"].unique()) <= 2 else 0.2,
             )
+            fig_pwc.update_layout(hovermode="closest")
             st.plotly_chart(fig_pwc, use_container_width=True, config=PLOTLY_CONFIG)
 
 
