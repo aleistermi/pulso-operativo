@@ -5,7 +5,7 @@
       "name": "dashboard",
       "runtimeExecutable": "streamlit",
       "runtimeArgs": ["run", "dashboard.py"],
-      "autoPort": true
+      "port": 8502
     }
   ]
 }

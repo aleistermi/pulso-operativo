@@ -36,7 +36,10 @@
       "Bash(gh api repos/Entropia-AI/pulso-operativo/transfer -f new_owner=\"aleistermi\" --method POST --jq '.full_name')",
       "Bash(git remote set-url origin https://github.com/aleistermi/pulso-operativo.git)",
       "Bash(gh api repos/aleistermi/pulso-operativo --jq '.full_name + \"\" | private: \"\" + \\(.private|tostring\\)')",
-      "Bash(git add dashboard.py)"
+      "Bash(git add dashboard.py)",
+      "Bash(pip show orjson)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''dashboard.py'', doraise=True\\)\")",
+      "Bash(lsof -i :8501 -i :8502)"
     ]
   }
 }
