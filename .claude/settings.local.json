@@ -61,7 +61,11 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(''dashboard.py''\\).read\\(\\)\\); print\\(''dashboard.py: Syntax OK''\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''check_bugs.py''\\).read\\(\\)\\); print\\(''check_bugs.py: Syntax OK''\\)\")",
       "Bash(git status -u)",
-      "Bash(git add dashboard.py bamboohr_client.py check_bugs.py)"
+      "Bash(git add dashboard.py bamboohr_client.py check_bugs.py)",
+      "Bash(lsof -ti :8501 -ti :8502)",
+      "Bash(xargs kill -9)",
+      "Bash(kill %1)",
+      "Bash(lsof -ti :8501 -ti :8502 -ti :8503)"
     ]
   }
 }
