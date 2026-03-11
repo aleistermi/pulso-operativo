@@ -223,6 +223,11 @@ EXCLUDED_PROJECTS = {
     "Agentes", "AI Agents", "BID consistencia-docs", "Consar",
     "Grupo Felix", "people_test", "Proepta", "Tendencia gastronómica", "Test For Demo",
 }
+EXCLUDED_ASSIGN_PROJECTS = {
+    "Research & Learning", "Reuniones internas", "Desarrollo de Negocios",
+    "Administracion/Operaciones", "Administración/Operaciones",
+    "Desarrollo de herramientas internas",
+}
 if not df_raw.empty:
     df_raw = df_raw[~df_raw["employeeName"].isin(EXCLUDED_PEOPLE)]
     df_raw.loc[df_raw["project"].isin(EXCLUDED_PROJECTS), "project"] = "Sin proyecto"
@@ -464,7 +469,7 @@ with tab_overview:
             orientation="h",
             marker_color="#b91c1c",
             name="Exceso",
-            text=ot_count.apply(lambda r: f"{r['avg_hrs']:.0f} hrs ({int(r['instancias'])}x)", axis=1),
+            text=ot_count["avg_hrs"].apply(lambda x: f"{x:.0f} hrs"),
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
@@ -582,7 +587,22 @@ with tab_person:
 # TAB 3: POR PROYECTO
 # ──────────────────────────────────────────────
 with tab_project:
-    projects_with_data = sorted(df_wd[df_wd["project"] != "Sin proyecto"]["project"].unique())
+    # Active vs inactive projects this week
+    all_assigned_projs = set()
+    for projs in bamboo_assignments.values():
+        all_assigned_projs.update(p for p in projs if p not in EXCLUDED_ASSIGN_PROJECTS and p not in EXCLUDED_PROJECTS)
+    projs_with_hours = set(df_wd[df_wd["project"] != "Sin proyecto"]["project"].unique())
+    active_projs = all_assigned_projs & projs_with_hours
+    inactive_projs = all_assigned_projs - projs_with_hours
+
+    pi1, pi2 = st.columns(2)
+    pi1.info(f"**Proyectos activos este periodo:** {len(active_projs)}")
+    pi2.warning(f"**Proyectos inactivos este periodo:** {len(inactive_projs)}")
+    if inactive_projs:
+        with st.expander(f"Ver proyectos inactivos ({len(inactive_projs)})"):
+            st.write(", ".join(sorted(inactive_projs)))
+
+    projects_with_data = sorted(projs_with_hours)
     if not projects_with_data:
         st.info("No hay proyectos con horas registradas en este periodo.")
     else:
@@ -1006,7 +1026,7 @@ with tab_assignments:
     import numpy as np
 
     # Build full project list and people list from BambooHR assignments
-    all_proj_names = sorted(all_bamboo_projects.values())
+    all_proj_names = sorted(p for p in all_bamboo_projects.values() if p not in EXCLUDED_ASSIGN_PROJECTS)
     # All people who have at least one project assigned
     assigned_people = sorted(bamboo_assignments.keys())
     # Filter out excluded people
@@ -1088,7 +1108,9 @@ with tab_assignments:
         for person in sorted(bamboo_assignments.keys()):
             if person in EXCLUDED_PEOPLE:
                 continue
-            projs = sorted(bamboo_assignments[person])
+            projs = sorted(p for p in bamboo_assignments[person] if p not in EXCLUDED_ASSIGN_PROJECTS)
+            if not projs:
+                continue
             person_rows.append({
                 "Persona": person,
                 "# Proyectos": len(projs),
@@ -1102,6 +1124,8 @@ with tab_assignments:
             if person in EXCLUDED_PEOPLE:
                 continue
             for proj in projs:
+                if proj in EXCLUDED_ASSIGN_PROJECTS:
+                    continue
                 proj_people.setdefault(proj, []).append(person)
         proj_rows = []
         for proj in sorted(proj_people.keys()):
