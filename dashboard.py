@@ -277,17 +277,26 @@ tab_overview, tab_person, tab_project, tab_dept, tab_costs, tab_assignments, tab
 # TAB 1: OVERVIEW
 # ──────────────────────────────────────────────
 with tab_overview:
-    # KPIs
+    # KPIs based on full selected period
+    period_start = df_wd["date"].min()
+    period_end = df_wd["date"].max()
+    if not pd.isna(period_start) and not pd.isna(period_end):
+        st.caption(f"{period_start.strftime('%d %b %Y')} — {period_end.strftime('%d %b %Y')}")
+
     k1, k2, k3, k4 = st.columns(4)
     total_hours = df_wd["hours"].sum()
     n_employees = df_wd["employeeName"].nunique()
     n_projects = df_wd[df_wd["project"] != "Sin proyecto"]["project"].nunique()
-    avg_per_emp = df_wd.groupby("employeeName")["hours"].sum().mean() if n_employees > 0 else 0
+    # Promedio semanal: horas promedio por persona por semana
+    if n_employees > 0 and df_wd["week_start"].nunique() > 0:
+        avg_weekly = df_wd.groupby(["employeeName", "week_start"])["hours"].sum().groupby("employeeName").mean().mean()
+    else:
+        avg_weekly = 0
 
     k1.metric("Horas totales", f"{total_hours:,.0f}")
     k2.metric("Personas activas", n_employees)
     k3.metric("Proyectos", n_projects)
-    k4.metric("Promedio hrs / persona", f"{avg_per_emp:,.2f}")
+    k4.metric("Prom hrs / persona / sem", f"{avg_weekly:,.2f}")
 
     st.markdown("")
 
@@ -324,6 +333,7 @@ with tab_overview:
         xaxis_title="", yaxis_title="Horas",
         showlegend=False,
     )
+    fig_weeks.update_layout(hovermode="closest")
     st.plotly_chart(fig_weeks, use_container_width=True, config=PLOTLY_CONFIG)
 
     # ── Two columns: Top N people + Projects bar ──
@@ -441,6 +451,7 @@ with tab_overview:
             barmode="stack",
             showlegend=False,
         )
+        fig_ot.update_layout(hovermode="closest")
         fig_ot.add_vline(x=40, line_dash="dot", line_color="#b91c1c", annotation_text="40 hrs", annotation_position="top", annotation_font_color="#b91c1c")
         st.plotly_chart(fig_ot, use_container_width=True, config=PLOTLY_CONFIG)
 
