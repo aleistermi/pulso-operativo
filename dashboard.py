@@ -74,7 +74,6 @@ PLOTLY_LAYOUT = dict(
     font=dict(family="Inter, system-ui, sans-serif", color=SLATE, size=13),
     title_font=dict(size=16, color=ACCENT),
     margin=dict(l=20, r=60, t=50, b=20),
-    hovermode="x unified",
 )
 
 # ── Custom CSS ──
@@ -153,12 +152,20 @@ def load_data(_days_back: int = 90):
     start_date = end_date - timedelta(days=_days_back)
     entries = client.get_timesheet_entries(start_date.isoformat(), end_date.isoformat())
 
+    # 3. All projects and assignments from BambooHR
+    emp_ids = [str(e["id"]) for e in employees]
+    all_projects, project_assignments_raw = client.get_project_assignments(emp_ids)
+    # Convert employee ID keys to employee names
+    project_assignments = {emp_map.get(eid, f"Employee {eid}"): projs for eid, projs in project_assignments_raw.items()}
+
     if not entries:
-        return pd.DataFrame(), {}, employees
+        return pd.DataFrame(), {}, employees, all_projects, project_assignments
 
     df = pd.json_normalize(entries)
     if "employeeId" in df.columns:
         df["employeeName"] = df["employeeId"].astype(str).map(emp_map).fillna("Unknown")
+    else:
+        df["employeeName"] = "Unknown"
 
     # Date enrichment
     df["date"] = pd.to_datetime(df["date"])
@@ -166,11 +173,20 @@ def load_data(_days_back: int = 90):
     df["week_start"] = df["date"].dt.to_period("W").apply(lambda p: p.start_time)
     df["weekday"] = df["date"].dt.day_name()
     df["is_weekday"] = df["date"].dt.dayofweek < 5
-    df["project"] = df["projectInfo.project.name"].fillna("Sin proyecto")
-    df["department"] = df["employeeId"].astype(str).map(dept_map).fillna("Sin departamento")
+    if "projectInfo.project.name" in df.columns:
+        df["project"] = df["projectInfo.project.name"].fillna("Sin proyecto")
+    else:
+        df["project"] = "Sin proyecto"
+    df["department"] = df["employeeId"].astype(str).map(dept_map).fillna("Sin departamento") if "employeeId" in df.columns else "Sin departamento"
+
+    # Ensure optional detail columns exist
+    for col in ["start", "end", "note"]:
+        if col not in df.columns:
+            df[col] = ""
 
     # Descontar 1 hr de comida en entries de 6+ hrs
     df["hours_raw"] = df["hours"]
+    df["hours"] = pd.to_numeric(df["hours"], errors="coerce").fillna(0)
     df["hours"] = df["hours"].apply(lambda h: max(h - 1, 0) if h >= 6 else h)
 
     # 3. Salary & hourly cost
@@ -183,13 +199,14 @@ def load_data(_days_back: int = 90):
             rate = float(num)
         except (ValueError, IndexError):
             rate = 0
-        if rate > 0:
-            hourly_map[str(e["id"])] = rate / 173.33
+        eid = e.get("id") or e.get("employeeId")
+        if rate > 0 and eid:
+            hourly_map[str(eid)] = rate / 173.33
 
     df["hourly_rate"] = df["employeeId"].astype(str).map(hourly_map).fillna(0)
     df["cost"] = df["hours"] * df["hourly_rate"]
 
-    return df, dept_map, employees
+    return df, dept_map, employees, all_projects, project_assignments
 
 
 # No toolbar on any chart
@@ -197,12 +214,18 @@ PLOTLY_CONFIG = {"displayModeBar": False}
 
 
 with st.spinner("Cargando datos de BambooHR..."):
-    df_raw, dept_map, all_employees_list = load_data()
+    df_raw, dept_map, all_employees_list, all_bamboo_projects, bamboo_assignments = load_data()
 
 EXCLUDED_PEOPLE = {
     "Andrés Ponce de León Rosas", "Max Lugo Delgadillo", "Aleister Montfort Ibieta",
 }
-df_raw = df_raw[~df_raw["employeeName"].isin(EXCLUDED_PEOPLE)]
+EXCLUDED_PROJECTS = {
+    "Agentes", "AI Agents", "BID consistencia-docs", "Consar",
+    "Grupo Felix", "people_test", "Proepta", "Tendencia gastronómica", "Test For Demo",
+}
+if not df_raw.empty:
+    df_raw = df_raw[~df_raw["employeeName"].isin(EXCLUDED_PEOPLE)]
+    df_raw.loc[df_raw["project"].isin(EXCLUDED_PROJECTS), "project"] = "Sin proyecto"
 
 if df_raw.empty:
     st.warning("No hay datos de timesheet para el periodo seleccionado.")
@@ -253,6 +276,9 @@ with f4:
 df = df_raw.copy()
 if len(date_range) == 2:
     df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
+elif len(date_range) == 1:
+    st.warning("Selecciona ambas fechas del rango.")
+    st.stop()
 if selected_dept != "Todos":
     df = df[df["department"] == selected_dept]
 if selected_project != "Todos":
@@ -306,7 +332,8 @@ with tab_overview:
         people=("employeeName", "nunique"),
     ).reset_index().sort_values("week_start")
     weekly_totals["week_label"] = weekly_totals["week_start"].dt.strftime("%d %b")
-    weekly_totals["avg_per_person"] = weekly_totals["hours"] / weekly_totals["people"]
+    # avg_per_person available if needed later
+    weekly_totals["avg_per_person"] = weekly_totals["hours"] / weekly_totals["people"].replace(0, 1)
 
     if len(weekly_totals) >= 2:
         prev = weekly_totals.iloc[-2]["hours"]
@@ -328,12 +355,12 @@ with tab_overview:
         hovertemplate="<b>%{x}</b><br>Horas: %{y:,.2f}<extra></extra>",
     ))
     fig_weeks.update_layout(
-        **PLOTLY_LAYOUT,
+        **PLOTLY_LAYOUT, hovermode="closest",
         title=f"Horas por semana  <span style='font-size:12px;color:{MUTED}'>{delta_label}</span>",
         xaxis_title="", yaxis_title="Horas",
         showlegend=False,
+        bargap=0.7 if len(weekly_totals) <= 2 else 0.3,
     )
-    fig_weeks.update_layout(hovermode="closest")
     st.plotly_chart(fig_weeks, use_container_width=True, config=PLOTLY_CONFIG)
 
     # ── Two columns: Top N people + Projects bar ──
@@ -449,9 +476,8 @@ with tab_overview:
             yaxis_title="", xaxis_title="Horas promedio/semana",
             height=max(300, len(ot_count) * 30),
             barmode="stack",
-            showlegend=False,
+            showlegend=False, hovermode="closest",
         )
-        fig_ot.update_layout(hovermode="closest")
         fig_ot.add_vline(x=40, line_dash="dot", line_color="#b91c1c", annotation_text="40 hrs", annotation_position="top", annotation_font_color="#b91c1c")
         st.plotly_chart(fig_ot, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -466,7 +492,11 @@ with tab_overview:
 # TAB 2: POR PERSONA
 # ──────────────────────────────────────────────
 with tab_person:
-    person = st.selectbox("Selecciona una persona", sorted(df["employeeName"].dropna().unique()), key="person_select")
+    available_people = sorted(df["employeeName"].dropna().unique())
+    if not available_people:
+        st.info("No hay personas con datos en el periodo seleccionado.")
+        st.stop()
+    person = st.selectbox("Selecciona una persona", available_people, key="person_select")
     df_person = df_wd[df_wd["employeeName"] == person]
 
     if df_person.empty:
@@ -502,6 +532,7 @@ with tab_person:
             **PLOTLY_LAYOUT,
             title=f"Semanas de {person}",
             xaxis_title="Semana (inicio)", yaxis_title="Horas",
+            bargap=0.7 if len(weekly) <= 2 else 0.3,
         )
         st.plotly_chart(fig_weekly, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -584,11 +615,10 @@ with tab_project:
             hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
         )
         fig_proj_stack.update_layout(
-            **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            **PLOTLY_LAYOUT, hovermode="closest", xaxis_title="Semana", yaxis_title="Horas", legend_title="",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
-            bargap=0.5 if len(proj_weekly["week_label"].unique()) <= 2 else 0.2,
+            bargap=0.7 if len(proj_weekly["week_label"].unique()) <= 2 else 0.3,
         )
-        fig_proj_stack.update_layout(hovermode="closest")
         st.plotly_chart(fig_proj_stack, use_container_width=True, config=PLOTLY_CONFIG)
 
         # Hours per contributor (horizontal bar)
@@ -620,7 +650,11 @@ with tab_project:
 # TAB 4: POR DEPARTAMENTO
 # ──────────────────────────────────────────────
 with tab_dept:
-    dept_sel = st.selectbox("Selecciona un departamento", sorted(df["department"].unique()), key="dept_select")
+    available_depts = sorted(df["department"].unique())
+    if not available_depts:
+        st.info("No hay departamentos con datos en el periodo seleccionado.")
+        st.stop()
+    dept_sel = st.selectbox("Selecciona un departamento", available_depts, key="dept_select")
     df_dept = df_wd[df_wd["department"] == dept_sel]
 
     if df_dept.empty:
@@ -652,11 +686,10 @@ with tab_dept:
             hovertemplate="<b>%{data.name}</b><br>Horas: %{y:,.2f}<extra></extra>",
         )
         fig_dept_stack.update_layout(
-            **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="Horas", legend_title="",
+            **PLOTLY_LAYOUT, hovermode="closest", xaxis_title="Semana", yaxis_title="Horas", legend_title="",
             legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
-            bargap=0.5 if len(dept_weekly["week_label"].unique()) <= 2 else 0.2,
+            bargap=0.7 if len(dept_weekly["week_label"].unique()) <= 2 else 0.3,
         )
-        fig_dept_stack.update_layout(hovermode="closest")
         st.plotly_chart(fig_dept_stack, use_container_width=True, config=PLOTLY_CONFIG)
 
         dc1, dc2 = st.columns(2)
@@ -757,6 +790,7 @@ with tab_costs:
             **PLOTLY_LAYOUT,
             title="Costo semanal total",
             xaxis_title="Semana", yaxis_title="MXN",
+            bargap=0.7 if len(weekly_cost) <= 2 else 0.3,
         )
         st.plotly_chart(fig_wc, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -799,11 +833,10 @@ with tab_costs:
                 hovertemplate="<b>%{data.name}</b><br>Costo: $%{y:,.0f}<extra></extra>",
             )
             fig_pwc.update_layout(
-                **PLOTLY_LAYOUT, xaxis_title="Semana", yaxis_title="MXN", legend_title="",
+                **PLOTLY_LAYOUT, hovermode="closest", xaxis_title="Semana", yaxis_title="MXN", legend_title="",
                 legend=dict(orientation="h", yanchor="top", y=-0.25, xanchor="left", x=0, font_size=11),
-                bargap=0.5 if len(proj_weekly_cost["week_label"].unique()) <= 2 else 0.2,
+                bargap=0.7 if len(proj_weekly_cost["week_label"].unique()) <= 2 else 0.3,
             )
-            fig_pwc.update_layout(hovermode="closest")
             st.plotly_chart(fig_pwc, use_container_width=True, config=PLOTLY_CONFIG)
 
 
@@ -831,37 +864,25 @@ with tab_assignments:
 
         st.markdown("")
 
-        # ── Filters: Person + Week for Treemap ──
-        tcol1, tcol2 = st.columns(2)
+        # ── Filter: Person for Treemap ──
         people_list = sorted(df_assigned["employeeName"].unique())
-        with tcol1:
-            selected_person_assign = st.selectbox(
-                "Persona", ["Todos"] + people_list, key="assign_person_select"
-            )
-        weeks_available = df_assigned.groupby("week_start").size().reset_index(name="n").sort_values("week_start", ascending=False)
-        week_labels_map = {row["week_start"].strftime("Semana del %d %b %Y"): row["week_start"] for _, row in weeks_available.iterrows()}
-        with tcol2:
-            selected_week_label_assign = st.selectbox(
-                "Semana", ["Todas"] + list(week_labels_map.keys()), key="assign_week_select"
-            )
+        selected_person_assign = st.selectbox(
+            "Persona", ["Todos"] + people_list, key="assign_person_select"
+        )
+
+        # Period label from global date filter
+        _p_start = df_assigned["date"].min()
+        _p_end = df_assigned["date"].max()
+        _period_label = f"{_p_start.strftime('%d %b')} — {_p_end.strftime('%d %b %Y')}" if not pd.isna(_p_start) else "periodo seleccionado"
 
         # Filter data for treemap
         tree_src = df_assigned.copy()
-        if selected_week_label_assign != "Todas":
-            tree_src = tree_src[tree_src["week_start"] == week_labels_map[selected_week_label_assign]]
 
-        title_parts = []
         if selected_person_assign != "Todos":
             tree_src = tree_src[tree_src["employeeName"] == selected_person_assign]
-            title_parts.append(selected_person_assign)
+            tree_title = f"Distribucion de tiempo: {selected_person_assign}, {_period_label}"
         else:
-            title_parts.append("todas las personas")
-        if selected_week_label_assign != "Todas":
-            title_parts.append(selected_week_label_assign.lower())
-        else:
-            title_parts.append("todo el periodo")
-
-        tree_title = f"Distribucion de tiempo: {', '.join(title_parts)}"
+            tree_title = f"Distribucion de tiempo: todas las personas, {_period_label}"
 
         if tree_src.empty:
             st.info("No hay datos para la seleccion.")
@@ -886,23 +907,22 @@ with tab_assignments:
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 margin=dict(l=10, r=10, t=40, b=10),
             )
-            fig_tree.update_traces(
-                textinfo="label+value+percent parent",
-                texttemplate="%{label}<br>%{value:,.2f}<br>%{percentParent:.1%}",
-                textfont=dict(size=12),
-                hovertemplate="<b>%{label}</b><br>Horas: %{value:,.2f}<br>%{percentParent:.1%} del total<extra></extra>",
-            )
+            n_leaves = len(tree_data)
+            if n_leaves > 1:
+                fig_tree.update_traces(
+                    textinfo="label+value+percent parent",
+                    texttemplate="%{label}<br>%{value:,.2f}<br>%{percentParent:.1%}",
+                    textfont=dict(size=12),
+                    hovertemplate="<b>%{label}</b><br>Horas: %{value:,.2f}<br>%{percentParent:.1%} del total<extra></extra>",
+                )
+            else:
+                fig_tree.update_traces(
+                    textinfo="label+value",
+                    texttemplate="%{label}<br>%{value:,.2f}",
+                    textfont=dict(size=12),
+                    hovertemplate="<b>%{label}</b><br>Horas: %{value:,.2f}<extra></extra>",
+                )
             st.plotly_chart(fig_tree, use_container_width=True, config=PLOTLY_CONFIG)
-
-        # ── Person × Project assignment table ──
-        assign_table = df_assigned.groupby("employeeName")["project"].apply(
-            lambda x: ", ".join(sorted(x.unique()))
-        ).reset_index()
-        assign_table.columns = ["Persona", "Proyectos"]
-        assign_table["# Proyectos"] = assign_table["Proyectos"].apply(lambda x: len(x.split(", ")))
-        assign_table = assign_table.sort_values("# Proyectos", ascending=False)
-        st.markdown("#### Asignaciones por persona")
-        st.dataframe(assign_table[["Persona", "# Proyectos", "Proyectos"]], use_container_width=True, hide_index=True)
 
         # ── Stacked horizontal bar: hours per person colored by project ──
         person_proj = df_assigned.groupby(["employeeName", "project"])["hours"].sum().reset_index()
@@ -921,13 +941,11 @@ with tab_assignments:
             hovertemplate="%{data.name}: %{x:,.2f} hrs<extra></extra>",
         )
         fig_stack.update_layout(
-            **PLOTLY_LAYOUT, xaxis_title="Horas", yaxis_title="", legend_title="",
+            **PLOTLY_LAYOUT, hovermode="closest", xaxis_title="Horas", yaxis_title="", legend_title="",
             legend=dict(orientation="h", yanchor="top", y=-0.3, xanchor="left", x=0, font_size=11),
             height=max(400, len(ordered_names) * 32),
             yaxis=dict(categoryorder="array", categoryarray=ordered_names),
         )
-        # Override unified hover from PLOTLY_LAYOUT — show only the hovered segment
-        fig_stack.update_layout(hovermode="closest")
         st.plotly_chart(fig_stack, use_container_width=True, config=PLOTLY_CONFIG)
 
         # ── Heatmap: Persona × Proyecto ──
@@ -938,15 +956,18 @@ with tab_assignments:
         heat_pivot = heat_pp.pivot_table(index="employeeName", columns="project", values="hours", fill_value=0)
 
         # Hierarchical clustering for rows (people) to group similar profiles
-        if len(heat_pivot) > 2:
-            row_linkage = linkage(heat_pivot.values, method="ward")
-            row_order = leaves_list(row_linkage)
-            heat_pivot = heat_pivot.iloc[row_order]
-        # Cluster columns (projects) too
-        if len(heat_pivot.columns) > 2:
-            col_linkage = linkage(heat_pivot.values.T, method="ward")
-            col_order = leaves_list(col_linkage)
-            heat_pivot = heat_pivot.iloc[:, col_order]
+        try:
+            if len(heat_pivot) > 2:
+                row_linkage = linkage(heat_pivot.values, method="ward")
+                row_order = leaves_list(row_linkage)
+                heat_pivot = heat_pivot.iloc[row_order]
+            # Cluster columns (projects) too
+            if len(heat_pivot.columns) > 2:
+                col_linkage = linkage(heat_pivot.values.T, method="ward")
+                col_order = leaves_list(col_linkage)
+                heat_pivot = heat_pivot.iloc[:, col_order]
+        except (ValueError, FloatingPointError):
+            pass  # Fall back to default ordering
 
         # Replace zeros with NaN so they show as blank
         heat_display = heat_pivot.replace(0, np.nan)
@@ -963,6 +984,7 @@ with tab_assignments:
             textfont=dict(size=11),
             colorscale=[[0, "#22c55e"], [0.5, "#facc15"], [1, "#ef4444"]],
             hovertemplate="<b>%{y}</b><br>Proyecto: %{x}<br>Horas: %{z:,.2f}<extra></extra>",
+            hoverongaps=False,
             showscale=True,
             colorbar=dict(title="Horas"),
         ))
@@ -975,6 +997,123 @@ with tab_assignments:
             height=max(450, len(heat_pivot) * 32),
         )
         st.plotly_chart(fig_heat_pp, use_container_width=True, config=PLOTLY_CONFIG)
+
+    # ── Snapshot: Asignaciones reales de BambooHR ──
+    st.markdown("---")
+    st.markdown("#### Asignaciones en BambooHR")
+    st.caption("Proyectos asignados a cada persona en BambooHR (independiente de si registraron horas)")
+
+    import numpy as np
+
+    # Build full project list and people list from BambooHR assignments
+    all_proj_names = sorted(all_bamboo_projects.values())
+    # All people who have at least one project assigned
+    assigned_people = sorted(bamboo_assignments.keys())
+    # Filter out excluded people
+    assigned_people = [p for p in assigned_people if p not in EXCLUDED_PEOPLE]
+
+    # Build binary matrix from BambooHR assignments (not timesheet entries)
+    snap_binary = pd.DataFrame(0, index=assigned_people, columns=all_proj_names)
+    for person, projs in bamboo_assignments.items():
+        if person in EXCLUDED_PEOPLE:
+            continue
+        for proj in projs:
+            if proj in snap_binary.columns:
+                snap_binary.loc[person, proj] = 1
+
+    # Remove projects with zero assignments
+    snap_binary = snap_binary.loc[:, snap_binary.sum(axis=0) > 0]
+
+    # Sort columns: projects with most assigned people first
+    col_counts = snap_binary.sum(axis=0).sort_values(ascending=False)
+    snap_binary = snap_binary[col_counts.index]
+    # Sort rows: people with most projects first
+    row_counts = snap_binary.sum(axis=1).sort_values(ascending=False)
+    snap_binary = snap_binary.loc[row_counts.index]
+
+    # Display: NaN for zeros so they appear blank in heatmap
+    snap_display = snap_binary.replace(0, np.nan)
+
+    fig_snap = go.Figure(data=go.Heatmap(
+        z=snap_display.values,
+        x=snap_display.columns.tolist(),
+        y=snap_display.index.tolist(),
+        colorscale=[[0, "rgba(0,0,0,0)"], [1, "#3b82f6"]],
+        hovertemplate="<b>%{y}</b><br>Proyecto: %{x}<extra></extra>",
+        hoverongaps=False,
+        showscale=False,
+        zmin=0, zmax=1,
+        xgap=2, ygap=2,
+    ))
+    # Annotations: project count per person (right side)
+    for person in snap_binary.index:
+        fig_snap.add_annotation(
+            x=len(snap_binary.columns) - 0.3, y=person,
+            text=f"<b>{int(row_counts[person])}</b>",
+            showarrow=False, xanchor="left", xshift=20,
+            font=dict(size=11, color="#3b82f6"),
+        )
+    # Annotations: person count per project (above plot area)
+    for proj in snap_binary.columns:
+        fig_snap.add_annotation(
+            x=proj, y=1, yref="paper",
+            text=f"<b>{int(col_counts[proj])}</b>",
+            showarrow=False, yanchor="bottom", yshift=4,
+            font=dict(size=10, color="#64748b"),
+        )
+    fig_snap.update_layout(
+        font=dict(family="Inter, system-ui, sans-serif", color="#334155"),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        title="Persona × Proyecto (asignaciones BambooHR)",
+        xaxis_title="", yaxis_title="",
+        xaxis=dict(side="bottom", tickangle=-45, showgrid=False),
+        yaxis=dict(showgrid=False),
+        margin=dict(l=20, r=80, t=80, b=20),
+        height=max(500, len(assigned_people) * 28),
+    )
+    st.plotly_chart(fig_snap, use_container_width=True, config=PLOTLY_CONFIG)
+
+    # Summary counts
+    active_proj_count = (col_counts > 0).sum()
+    st.caption(f"{active_proj_count} proyectos con asignaciones · {len(assigned_people)} personas")
+
+    # ── Asignaciones BambooHR: toggle persona/proyecto ──
+    st.markdown("---")
+    st.markdown("#### Detalle de Asignaciones BambooHR")
+    assign_view = st.radio(
+        "Agrupar por", ["Persona", "Proyecto"], horizontal=True, key="assign_view_toggle"
+    )
+    if assign_view == "Persona":
+        person_rows = []
+        for person in sorted(bamboo_assignments.keys()):
+            if person in EXCLUDED_PEOPLE:
+                continue
+            projs = sorted(bamboo_assignments[person])
+            person_rows.append({
+                "Persona": person,
+                "# Proyectos": len(projs),
+                "Proyectos": ", ".join(projs),
+            })
+        df_assign_view = pd.DataFrame(person_rows).sort_values("# Proyectos", ascending=False)
+        st.dataframe(df_assign_view, use_container_width=True, hide_index=True)
+    else:
+        proj_people: dict[str, list[str]] = {}
+        for person, projs in bamboo_assignments.items():
+            if person in EXCLUDED_PEOPLE:
+                continue
+            for proj in projs:
+                proj_people.setdefault(proj, []).append(person)
+        proj_rows = []
+        for proj in sorted(proj_people.keys()):
+            people = sorted(proj_people[proj])
+            proj_rows.append({
+                "Proyecto": proj,
+                "# Personas": len(people),
+                "Colaboradores": ", ".join(people),
+            })
+        df_assign_view = pd.DataFrame(proj_rows).sort_values("# Personas", ascending=False)
+        st.dataframe(df_assign_view, use_container_width=True, hide_index=True)
+
 
 
 # ──────────────────────────────────────────────
@@ -1114,12 +1253,15 @@ with tab_report:
             report_lines.append("| Proyecto | Costo | Horas | Personas | vs Anterior |")
             report_lines.append("|:--|--:|--:|--:|--:|")
             for _, r in proj_cost_curr.iterrows():
-                prev_c = proj_cost_prev.get(r["project"], 0)
-                if prev_c > 0:
-                    d = ((r["cost"] - prev_c) / prev_c * 100)
-                    delta = f"{d:+.1f}%"
+                if r["project"] not in proj_cost_prev:
+                    delta = "nuevo"
                 else:
-                    delta = "nuevo" if prev_c == 0 else "—"
+                    prev_c = proj_cost_prev[r["project"]]
+                    if prev_c > 0:
+                        d = ((r["cost"] - prev_c) / prev_c * 100)
+                        delta = f"{d:+.1f}%"
+                    else:
+                        delta = "—"
                 report_lines.append(f"| {r['project']} | ${r['cost']:,.0f} | {r['hours']:,.2f} | {int(r['people'])} | {delta} |")
         else:
             report_lines.append("Sin datos de costo")
@@ -1132,12 +1274,15 @@ with tab_report:
             report_lines.append("| Proyecto | Horas | Personas | vs Anterior |")
             report_lines.append("|:--|--:|--:|--:|")
             for _, r in proj_hrs_curr.iterrows():
-                prev_h = proj_hrs_prev.get(r["project"], 0)
-                if prev_h > 0:
-                    d = ((r["hours"] - prev_h) / prev_h * 100)
-                    delta = f"{d:+.1f}%"
-                else:
+                if r["project"] not in proj_hrs_prev:
                     delta = "nuevo"
+                else:
+                    prev_h = proj_hrs_prev[r["project"]]
+                    if prev_h > 0:
+                        d = ((r["hours"] - prev_h) / prev_h * 100)
+                        delta = f"{d:+.1f}%"
+                    else:
+                        delta = "—"
                 report_lines.append(f"| {r['project']} | {r['hours']:,.2f} | {int(r['people'])} | {delta} |")
         report_lines.append("")
 
@@ -1318,8 +1463,11 @@ with tab_report:
                 pdf.section_title("Costo por Proyecto")
                 cost_rows = []
                 for _, r in proj_cost_curr.iterrows():
-                    prev_c = proj_cost_prev.get(r["project"], 0)
-                    delta = f"{((r['cost'] - prev_c) / prev_c * 100):+.1f}%" if prev_c > 0 else "nuevo"
+                    if r["project"] not in proj_cost_prev:
+                        delta = "nuevo"
+                    else:
+                        prev_c = proj_cost_prev[r["project"]]
+                        delta = f"{((r['cost'] - prev_c) / prev_c * 100):+.1f}%" if prev_c > 0 else "—"
                     cost_rows.append([r["project"], f"${r['cost']:,.0f}", f"{r['hours']:,.2f}", str(int(r["people"])), delta])
                 pdf.add_table(["Proyecto", "Costo", "Horas", "Personas", "vs Ant."], cost_rows, [60, 35, 30, 30, 35])
 
@@ -1328,8 +1476,11 @@ with tab_report:
                 pdf.section_title("Horas por Proyecto")
                 hrs_rows = []
                 for _, r in proj_hrs_curr.iterrows():
-                    prev_h = proj_hrs_prev.get(r["project"], 0)
-                    delta = f"{((r['hours'] - prev_h) / prev_h * 100):+.1f}%" if prev_h > 0 else "nuevo"
+                    if r["project"] not in proj_hrs_prev:
+                        delta = "nuevo"
+                    else:
+                        prev_h = proj_hrs_prev[r["project"]]
+                        delta = f"{((r['hours'] - prev_h) / prev_h * 100):+.1f}%" if prev_h > 0 else "—"
                     hrs_rows.append([r["project"], f"{r['hours']:,.2f}", str(int(r["people"])), delta])
                 pdf.add_table(["Proyecto", "Horas", "Personas", "vs Ant."], hrs_rows, [70, 40, 40, 40])
 
@@ -1380,12 +1531,15 @@ with tab_report:
             return buf.getvalue()
 
         st.markdown("")
+        # Cache PDF so it only generates once per week selection
+        _pdf_cache_key = f"pdf_{selected_week_start.strftime('%Y-%m-%d')}"
+        if _pdf_cache_key not in st.session_state:
+            st.session_state[_pdf_cache_key] = generate_pdf()
         col_dl1, col_dl2, col_dl3, _ = st.columns([1, 1, 1, 2])
         with col_dl1:
-            pdf_bytes = generate_pdf()
             st.download_button(
                 "Descargar PDF",
-                data=pdf_bytes,
+                data=st.session_state[_pdf_cache_key],
                 file_name=f"reporte_semanal_{selected_week_start.strftime('%Y-%m-%d')}.pdf",
                 mime="application/pdf",
             )

@@ -49,6 +49,47 @@ class BambooHRClient:
         start = end - timedelta(days=days_back)
         return self.get_timesheet_entries(start.isoformat(), end.isoformat(), employee_ids)
 
+    def get_all_projects(self, employee_ids: list[str] | None = None) -> dict[int, str]:
+        """Fetch all projects from BambooHR by querying each employee's assigned projects.
+
+        Args:
+            employee_ids: List of employee ID strings. If None, fetches employees first.
+
+        Returns:
+            Dict mapping project ID -> project name.
+        """
+        projects, _ = self.get_project_assignments(employee_ids)
+        return projects
+
+    def get_project_assignments(self, employee_ids: list[str] | None = None) -> tuple[dict[int, str], dict[str, list[str]]]:
+        """Fetch all projects AND employee-project assignments from BambooHR.
+
+        Args:
+            employee_ids: List of employee ID strings. If None, fetches employees first.
+
+        Returns:
+            Tuple of:
+                - Dict mapping project ID -> project name
+                - Dict mapping employee ID -> list of project names
+        """
+        if employee_ids is None:
+            employees = self.get_employees()
+            employee_ids = [str(e["id"]) for e in employees]
+
+        projects: dict[int, str] = {}
+        assignments: dict[str, list[str]] = {}
+        for eid in employee_ids:
+            url = f"{self.base_url}/time_tracking/employee/{eid}/projects"
+            resp = self.session.get(url)
+            if resp.status_code == 200:
+                emp_projects = []
+                for p in resp.json():
+                    projects[p["id"]] = p["name"]
+                    emp_projects.append(p["name"])
+                if emp_projects:
+                    assignments[eid] = emp_projects
+        return projects, assignments
+
     def get_salary_report(self) -> list[dict]:
         """Fetch pay rate data for all employees via custom report.
 
