@@ -3,6 +3,7 @@
 import io
 import os
 import json
+import requests
 from datetime import date, timedelta
 
 import pandas as pd
@@ -232,6 +233,48 @@ if not df_raw.empty:
     df_raw = df_raw[~df_raw["employeeName"].isin(EXCLUDED_PEOPLE)]
     df_raw.loc[df_raw["project"].isin(EXCLUDED_PROJECTS), "project"] = "Sin proyecto"
 
+@st.cache_data(ttl=86400)
+def get_exchange_rate(from_currency: str, to_currency: str = "MXN", rate_date: str = "") -> float:
+    """Fetch exchange rate from Frankfurter API. Cached for 24h.
+
+    Args:
+        from_currency: Source currency code (USD, EUR, MXN).
+        to_currency: Target currency code (default MXN).
+        rate_date: Date in YYYY-MM-DD format. Empty string = latest.
+    """
+    if from_currency == to_currency:
+        return 1.0
+    endpoint = rate_date if rate_date else "latest"
+    try:
+        r = requests.get(
+            f"https://api.frankfurter.dev/v1/{endpoint}",
+            params={"from": from_currency, "to": to_currency},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()["rates"][to_currency]
+    except Exception:
+        # Fallback rates if API fails
+        fallback = {"USD": 17.7, "EUR": 21.5}
+        return fallback.get(from_currency, 20.0)
+
+
+INTERNAL_PROJECTS = {"Reuniones internas", "Research & Learning", "Backoffice", "people_test", "Sin proyecto", "Administración/Operaciones", "Desarrollo de herramientas internas"}
+
+PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
+
+
+def load_projects() -> list[dict]:
+    if os.path.exists(PROJECTS_FILE):
+        with open(PROJECTS_FILE) as f:
+            return json.load(f)
+    return []
+
+
+def save_projects(projects: list[dict]):
+    with open(PROJECTS_FILE, "w") as f:
+        json.dump(projects, f, indent=2, ensure_ascii=False, default=str)
+
 if df_raw.empty:
     st.warning("No hay datos de timesheet para el periodo seleccionado.")
     st.stop()
@@ -299,8 +342,8 @@ st.divider()
 # ══════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════
-tab_overview, tab_person, tab_project, tab_dept, tab_costs, tab_assignments, tab_report = st.tabs(
-    ["Overview", "Por Persona", "Por Proyecto", "Por Departamento", "Costos", "Asignaciones", "Reporte"]
+tab_overview, tab_person, tab_project, tab_dept, tab_costs, tab_assignments, tab_report, tab_rentabilidad = st.tabs(
+    ["Overview", "Por Persona", "Por Proyecto", "Por Departamento", "Costos", "Asignaciones", "Reporte", "Rentabilidad"]
 )
 
 
@@ -1582,3 +1625,506 @@ with tab_report:
                 file_name=f"reporte_semanal_{selected_week_start.strftime('%Y-%m-%d')}.txt",
                 mime="text/plain",
             )
+
+
+# ──────────────────────────────────────────────
+# TAB 8: RENTABILIDAD
+# ──────────────────────────────────────────────
+with tab_rentabilidad:
+
+    # ── Helper: compute auto-estimate for a project ──
+    def _auto_estimate(project_name: str, start_date_str: str) -> tuple[float, float, float]:
+        """Return (auto_estimate, avg_monthly_cost, months_before) for backward estimation."""
+        proj_data = df_raw[(df_raw["project"] == project_name) & (df_raw["hourly_rate"] > 0)]
+        if proj_data.empty or not start_date_str:
+            return 0.0, 0.0, 0.0
+        # Monthly average from tracked data
+        proj_weekly = proj_data.groupby("week_start")["cost"].sum()
+        avg_weekly = proj_weekly.mean()
+        avg_monthly = avg_weekly * 4.33  # weeks per month
+
+        # Months between project start and first tracked week
+        first_tracked = proj_data["date"].min()
+        proj_start = pd.Timestamp(start_date_str)
+        if proj_start >= first_tracked:
+            return 0.0, avg_monthly, 0.0
+        months_before = (first_tracked - proj_start).days / 30.44
+        return avg_monthly * months_before, avg_monthly, months_before
+
+    # ── Load project configs ──
+    project_configs = load_projects()
+    config_by_name = {p["name"]: p for p in project_configs}
+
+    # ── Billable projects from timesheet data ──
+    billable_projects_in_data = sorted(
+        set(df_raw["project"].unique()) - INTERNAL_PROJECTS
+    )
+
+    # ── Compute tracked cost per project ──
+    tracked_cost_by_project = (
+        df_raw[(df_raw["project"].isin(billable_projects_in_data)) & (df_raw["hourly_rate"] > 0)]
+        .groupby("project")["cost"].sum()
+        .to_dict()
+    )
+    tracked_hours_by_project = (
+        df_raw[df_raw["project"].isin(billable_projects_in_data)]
+        .groupby("project")["hours"].sum()
+        .to_dict()
+    )
+
+    # ══════════════════════════════════════
+    # ADMIN SECTION
+    # ══════════════════════════════════════
+    with st.expander("🔒 Administrar proyectos"):
+        admin_pw = get_secret("ADMIN_PASSWORD", "")
+        if not admin_pw:
+            st.warning("ADMIN_PASSWORD no configurado en .env")
+        else:
+            if "admin_auth" not in st.session_state:
+                st.session_state.admin_auth = False
+
+            if not st.session_state.admin_auth:
+                ac1, ac2 = st.columns([2, 1])
+                with ac1:
+                    pwd_input = st.text_input("Password de admin", type="password", key="admin_pwd_input")
+                with ac2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Desbloquear"):
+                        if pwd_input == admin_pw:
+                            st.session_state.admin_auth = True
+                            st.rerun()
+                        else:
+                            st.error("Password incorrecto")
+            else:
+                st.success("Admin desbloqueado")
+
+                # Project selector
+                configured_names = [p["name"] for p in project_configs]
+                unconfigured = [p for p in billable_projects_in_data if p not in configured_names]
+
+                admin_options = ["Agregar proyecto", "Editar proyecto existente"] if unconfigured else ["Editar proyecto existente"]
+                admin_action = st.radio(
+                    "Acción",
+                    admin_options,
+                    horizontal=True,
+                    key="rent_admin_action",
+                )
+
+                if admin_action == "Agregar proyecto" and unconfigured:
+                    new_proj_name = st.selectbox("Proyecto a configurar", unconfigured, key="rent_new_proj")
+                    est, avg_m, months_b = _auto_estimate(new_proj_name, "")
+                    st.caption(f"Costo promedio mensual tracked: **${avg_m:,.0f}**")
+
+                    with st.form("add_project_form"):
+                        apc1, apc2 = st.columns(2)
+                        with apc1:
+                            np_client = st.text_input("Cliente", key="np_client")
+                            np_currency = st.selectbox("Moneda del contrato", ["MXN", "USD", "EUR"], key="np_currency")
+                            np_original_amount = st.number_input("Monto original del contrato", min_value=0.0, step=1000.0, key="np_original_amount")
+                            np_contract_type = st.selectbox("Tipo de contrato", ["proyecto", "mensual"], key="np_contract_type")
+                            np_start = st.date_input("Fecha inicio del proyecto", key="np_start")
+                            np_end = st.date_input("Fecha fin estimada", key="np_end")
+                        with apc2:
+                            np_margin = st.number_input("Margen objetivo (%)", min_value=0.0, max_value=100.0, value=30.0, step=5.0, key="np_margin")
+                            np_status = st.selectbox("Estatus", ["activo", "completado", "pausado"], key="np_status")
+                            np_notes = st.text_area("Notas", key="np_notes", height=80)
+                            if np_currency != "MXN" and np_original_amount > 0:
+                                np_rate = get_exchange_rate(np_currency, "MXN", str(np_start))
+                                st.info(f"Tipo de cambio {np_currency}/MXN al {np_start}: **{np_rate:.4f}**\n\nValor en MXN: **${np_original_amount * np_rate:,.0f}**")
+                            else:
+                                np_rate = 1.0
+
+                        st.markdown("**Gasto estimado pre-tracking**")
+                        try:
+                            est_auto, avg_m2, months_b2 = _auto_estimate(new_proj_name, str(np_start))
+                        except Exception:
+                            est_auto, avg_m2, months_b2 = 0.0, 0.0, 0.0
+                        if months_b2 > 0:
+                            st.caption(f"Sugerido: **${est_auto:,.0f}** (${avg_m2:,.0f}/mes × {months_b2:.1f} meses antes del tracking)")
+                        np_estimated = st.number_input("Gasto pre-tracking ($)", min_value=0.0, value=float(est_auto), step=5000.0, key="np_estimated")
+
+                        st.markdown("**Hitos de pago**")
+                        n_milestones = st.number_input("Número de hitos", min_value=0, max_value=20, value=0, step=1, key="np_n_milestones")
+                        milestones = []
+                        for i in range(int(n_milestones)):
+                            mc1, mc2, mc3, mc4 = st.columns([3, 2, 1, 2])
+                            with mc1:
+                                m_desc = st.text_input(f"Descripción hito {i+1}", key=f"np_m_desc_{i}")
+                            with mc2:
+                                m_amount = st.number_input(f"Monto {i+1}", min_value=0.0, step=10000.0, key=f"np_m_amount_{i}")
+                            with mc3:
+                                m_paid = st.checkbox("Pagado", key=f"np_m_paid_{i}")
+                            with mc4:
+                                m_date = st.date_input(f"Fecha {i+1}", key=f"np_m_date_{i}")
+                            milestones.append({"description": m_desc, "amount": m_amount, "paid": m_paid, "date": str(m_date)})
+
+                        if st.form_submit_button("Guardar proyecto"):
+                            # Calculate MXN value using exchange rate
+                            if np_currency != "MXN" and np_original_amount > 0:
+                                save_rate = get_exchange_rate(np_currency, "MXN", str(np_start))
+                                save_contract_value = round(np_original_amount * save_rate)
+                            else:
+                                save_rate = 1.0
+                                save_contract_value = np_original_amount
+                            new_entry = {
+                                "name": new_proj_name,
+                                "client": np_client,
+                                "contract_value": save_contract_value,
+                                "contract_type": np_contract_type,
+                                "original_currency": np_currency,
+                                "original_amount": np_original_amount,
+                                "exchange_rate": round(save_rate, 4),
+                                "estimated_spent_before": np_estimated,
+                                "auto_estimate": est_auto,
+                                "start_date": str(np_start),
+                                "end_date": str(np_end),
+                                "margin_target": np_margin,
+                                "status": np_status,
+                                "notes": np_notes,
+                                "milestones": milestones,
+                            }
+                            project_configs.append(new_entry)
+                            save_projects(project_configs)
+                            st.success(f"Proyecto '{new_proj_name}' guardado")
+                            st.rerun()
+
+                elif admin_action == "Agregar proyecto" and not unconfigured:
+                    st.info("Todos los proyectos facturables ya están configurados.")
+
+                elif admin_action == "Editar proyecto existente" and configured_names:
+                    edit_proj = st.selectbox("Proyecto", configured_names, key="rent_edit_proj")
+                    pc = config_by_name.get(edit_proj)
+                    if not pc:
+                        st.warning("Proyecto no encontrado. Recarga la página.")
+                        st.stop()
+
+                    with st.form("edit_project_form"):
+                        epc1, epc2 = st.columns(2)
+                        with epc1:
+                            ep_client = st.text_input("Cliente", value=pc.get("client", ""), key="ep_client")
+                            ep_curr_options = ["MXN", "USD", "EUR"]
+                            ep_curr_idx = ep_curr_options.index(pc.get("original_currency", "MXN")) if pc.get("original_currency", "MXN") in ep_curr_options else 0
+                            ep_currency = st.selectbox("Moneda del contrato", ep_curr_options, index=ep_curr_idx, key="ep_currency")
+                            ep_original_amount = st.number_input("Monto original", min_value=0.0, value=float(pc.get("original_amount", pc.get("contract_value", 0))), step=1000.0, key="ep_original_amount")
+                            ep_contract_type = st.selectbox("Tipo de contrato", ["proyecto", "mensual"], index=["proyecto", "mensual"].index(pc.get("contract_type", "proyecto")), key="ep_contract_type")
+                            ep_start = st.date_input("Fecha inicio", value=pd.Timestamp(pc["start_date"]).date() if pc.get("start_date") else date.today(), key="ep_start")
+                            ep_end = st.date_input("Fecha fin estimada", value=pd.Timestamp(pc["end_date"]).date() if pc.get("end_date") else date.today(), key="ep_end")
+                        with epc2:
+                            ep_margin = st.number_input("Margen objetivo (%)", min_value=0.0, max_value=100.0, value=float(pc.get("margin_target", 30)), step=5.0, key="ep_margin")
+                            ep_status = st.selectbox("Estatus", ["activo", "completado", "pausado"], index=["activo", "completado", "pausado"].index(pc.get("status", "activo")), key="ep_status")
+                            ep_notes = st.text_area("Notas", value=pc.get("notes", ""), key="ep_notes", height=80)
+                            if ep_currency != "MXN" and ep_original_amount > 0:
+                                ep_rate = get_exchange_rate(ep_currency, "MXN", str(ep_start))
+                                ep_contract_mxn = round(ep_original_amount * ep_rate)
+                                st.info(f"TC {ep_currency}/MXN al {ep_start}: **{ep_rate:.4f}**\n\nValor MXN: **${ep_contract_mxn:,.0f}**")
+                            else:
+                                ep_rate = 1.0
+                                ep_contract_mxn = ep_original_amount
+
+                        try:
+                            est_auto, avg_m, months_b = _auto_estimate(edit_proj, str(ep_start))
+                        except Exception:
+                            est_auto, avg_m, months_b = 0.0, 0.0, 0.0
+                        st.markdown("**Gasto estimado pre-tracking**")
+                        if months_b > 0:
+                            st.caption(f"Sugerido: **${est_auto:,.0f}** (${avg_m:,.0f}/mes × {months_b:.1f} meses)")
+                        ep_estimated = st.number_input("Gasto pre-tracking ($)", min_value=0.0, value=float(pc.get("estimated_spent_before", 0) or est_auto), step=5000.0, key="ep_estimated")
+
+                        st.markdown("**Hitos de pago**")
+                        existing_milestones = pc.get("milestones", [])
+                        ep_n_milestones = st.number_input("Número de hitos", min_value=0, max_value=20, value=len(existing_milestones), step=1, key="ep_n_milestones")
+                        milestones = []
+                        for i in range(int(ep_n_milestones)):
+                            em = existing_milestones[i] if i < len(existing_milestones) else {}
+                            mc1, mc2, mc3, mc4 = st.columns([3, 2, 1, 2])
+                            with mc1:
+                                m_desc = st.text_input(f"Descripción {i+1}", value=em.get("description", ""), key=f"ep_m_desc_{i}")
+                            with mc2:
+                                m_amount = st.number_input(f"Monto {i+1}", min_value=0.0, value=float(em.get("amount", 0)), step=10000.0, key=f"ep_m_amount_{i}")
+                            with mc3:
+                                m_paid = st.checkbox("Pagado", value=em.get("paid", False), key=f"ep_m_paid_{i}")
+                            with mc4:
+                                m_date = st.date_input(f"Fecha {i+1}", value=pd.Timestamp(em["date"]).date() if em.get("date") else date.today(), key=f"ep_m_date_{i}")
+                            milestones.append({"description": m_desc, "amount": m_amount, "paid": m_paid, "date": str(m_date)})
+
+                        epc_save, epc_del = st.columns([1, 1])
+                        submitted = st.form_submit_button("Guardar cambios")
+                        if submitted:
+                            # Recalculate MXN value
+                            if ep_currency != "MXN" and ep_original_amount > 0:
+                                save_rate = get_exchange_rate(ep_currency, "MXN", str(ep_start))
+                                save_contract_value = round(ep_original_amount * save_rate)
+                            else:
+                                save_rate = 1.0
+                                save_contract_value = ep_original_amount
+                            pc.update({
+                                "client": ep_client,
+                                "contract_value": save_contract_value,
+                                "contract_type": ep_contract_type,
+                                "original_currency": ep_currency,
+                                "original_amount": ep_original_amount,
+                                "exchange_rate": round(save_rate, 4),
+                                "estimated_spent_before": ep_estimated,
+                                "auto_estimate": est_auto,
+                                "start_date": str(ep_start),
+                                "end_date": str(ep_end),
+                                "margin_target": ep_margin,
+                                "status": ep_status,
+                                "notes": ep_notes,
+                                "milestones": milestones,
+                            })
+                            save_projects(project_configs)
+                            st.success("Cambios guardados")
+                            st.rerun()
+
+                    # Delete button outside form
+                    if st.button(f"Eliminar '{edit_proj}'", type="secondary", key="rent_delete"):
+                        st.session_state[f"confirm_delete_{edit_proj}"] = True
+                    if st.session_state.get(f"confirm_delete_{edit_proj}"):
+                        st.warning(f"¿Seguro que quieres eliminar **{edit_proj}**?")
+                        dc1, dc2 = st.columns(2)
+                        with dc1:
+                            if st.button("Sí, eliminar", key="rent_confirm_del"):
+                                project_configs[:] = [p for p in project_configs if p["name"] != edit_proj]
+                                save_projects(project_configs)
+                                st.session_state.pop(f"confirm_delete_{edit_proj}", None)
+                                st.rerun()
+                        with dc2:
+                            if st.button("Cancelar", key="rent_cancel_del"):
+                                st.session_state.pop(f"confirm_delete_{edit_proj}", None)
+                                st.rerun()
+
+                elif admin_action == "Editar proyecto existente" and not configured_names:
+                    st.info("No hay proyectos configurados. Agrega uno primero.")
+
+    # ══════════════════════════════════════
+    # MAIN VIEW: RENTABILIDAD
+    # ══════════════════════════════════════
+
+    # Reload configs after potential edits
+    project_configs = load_projects()
+    active_configs = [p for p in project_configs if p.get("status", "activo") == "activo"]
+
+    if not project_configs:
+        st.info("No hay proyectos configurados. Usa la sección de admin para agregar proyectos.")
+    else:
+        # Build summary data for each configured project
+        rentab_data = []
+        for pc in project_configs:
+            name = pc["name"]
+            contract = pc.get("contract_value", 0)
+            ctype = pc.get("contract_type", "proyecto")
+            est_before = pc.get("estimated_spent_before", 0)
+            tracked = tracked_cost_by_project.get(name, 0)
+            target = pc.get("margin_target", 30)
+
+            # Burn rate (monthly avg from tracked data)
+            proj_weeks = df_raw[(df_raw["project"] == name) & (df_raw["hourly_rate"] > 0)].groupby("week_start")["cost"].sum()
+            avg_weekly = proj_weeks.mean() if not proj_weeks.empty else 0
+            burn_monthly = avg_weekly * 4.33
+
+            # For monthly contracts, use the higher of: tracked burn rate vs
+            # est_before / months_active (captures untracked costs like full-time people)
+            if ctype == "mensual" and est_before > 0:
+                try:
+                    proj_start = pd.Timestamp(pc.get("start_date"))
+                    months_active = max((pd.Timestamp("today") - proj_start).days / 30.44, 1)
+                    burn_from_est = est_before / months_active
+                    burn_monthly = max(burn_monthly, burn_from_est)
+                except Exception:
+                    pass
+
+            milestones = pc.get("milestones", [])
+            total_facturado = sum(m.get("amount", 0) for m in milestones)
+            total_cobrado = sum(m.get("amount", 0) for m in milestones if m.get("paid"))
+
+            if ctype == "mensual":
+                # Monthly: compare monthly cost vs monthly income
+                total_spent = burn_monthly  # display as "gasto mensual"
+                margin = contract - burn_monthly
+                pct_used = (burn_monthly / contract * 100) if contract > 0 else 0
+                pct_margin = (margin / contract * 100) if contract > 0 else 0
+                months_remaining = 0  # not applicable for monthly
+            else:
+                # Lump sum: compare total accumulated cost vs contract
+                total_spent = est_before + tracked
+                margin = contract - total_spent if contract > 0 else 0
+                pct_used = (total_spent / contract * 100) if contract > 0 else 0
+                pct_margin = (margin / contract * 100) if contract > 0 else 0
+                months_remaining = (margin / burn_monthly) if burn_monthly > 0 and margin > 0 else 0
+
+            rentab_data.append({
+                "name": name,
+                "client": pc.get("client", ""),
+                "status": pc.get("status", "activo"),
+                "contract_type": ctype,
+                "contract": contract,
+                "est_before": est_before,
+                "tracked": tracked,
+                "total_spent": total_spent,
+                "margin": margin,
+                "pct_used": pct_used,
+                "pct_margin": pct_margin,
+                "target": target,
+                "burn_monthly": burn_monthly,
+                "months_remaining": months_remaining,
+                "milestones": milestones,
+                "total_facturado": total_facturado,
+                "total_cobrado": total_cobrado,
+                "original_currency": pc.get("original_currency", "MXN"),
+                "original_amount": pc.get("original_amount", contract),
+                "exchange_rate": pc.get("exchange_rate", 1.0),
+            })
+
+        # Sort by % used descending (most at-risk first)
+        rentab_data.sort(key=lambda x: x["pct_used"], reverse=True)
+
+        # ── Separate project vs monthly ──
+        proj_only = [r for r in rentab_data if r["contract_type"] == "proyecto"]
+        monthly_only = [r for r in rentab_data if r["contract_type"] == "mensual"]
+
+        # ── KPI cards (project-type only for totals) ──
+        total_contracts = sum(r["contract"] for r in proj_only)
+        total_spent_proj = sum(r["total_spent"] for r in proj_only)
+        total_margin_proj = total_contracts - total_spent_proj
+        avg_pct_margin = (total_margin_proj / total_contracts * 100) if total_contracts > 0 else 0
+        total_cobrado_all = sum(r["total_cobrado"] for r in rentab_data)
+
+        rk1, rk2, rk3, rk4, rk5 = st.columns(5)
+        rk1.metric("Contratos (proyecto)", f"${total_contracts:,.0f}")
+        rk2.metric("Gastado acumulado", f"${total_spent_proj:,.0f}")
+        rk3.metric("Margen bruto", f"${total_margin_proj:,.0f}")
+        rk4.metric("Margen promedio", f"{avg_pct_margin:.1f}%")
+        rk5.metric("Proyectos activos", f"{len([r for r in rentab_data if r['status'] == 'activo'])}")
+
+        st.markdown("")
+
+        def _rentab_bar_chart(data, title):
+            """Render horizontal bar chart for a list of rentab_data entries."""
+            if not data:
+                return
+            data_sorted = sorted(data, key=lambda x: x["pct_used"], reverse=True)
+            bar_names = [r["name"] for r in data_sorted]
+            bar_pcts = [min(r["pct_used"], 150) for r in data_sorted]
+            bar_colors = []
+            for r in data_sorted:
+                if r["pct_used"] > 85:
+                    bar_colors.append("#dc2626")
+                elif r["pct_used"] > 60:
+                    bar_colors.append("#d97706")
+                else:
+                    bar_colors.append("#16a34a")
+
+            is_monthly = data_sorted[0].get("contract_type") == "mensual"
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                y=bar_names[::-1],
+                x=bar_pcts[::-1],
+                orientation="h",
+                marker_color=bar_colors[::-1],
+                text=[f"{p:.0f}%" for p in bar_pcts[::-1]],
+                textposition="auto",
+                hovertemplate=[
+                    f"<b>{r['name']}</b><br>"
+                    + (f"Ingreso mensual: ${r['contract']:,.0f}<br>"
+                       f"Gasto mensual: ${r['burn_monthly']:,.0f}<br>"
+                       f"Margen mensual: ${r['margin']:,.0f} ({r['pct_margin']:.1f}%)"
+                       if is_monthly else
+                       f"Contrato: ${r['contract']:,.0f}<br>"
+                       f"Gastado: ${r['total_spent']:,.0f} ({r['pct_used']:.1f}%)<br>"
+                       f"Margen: ${r['margin']:,.0f} ({r['pct_margin']:.1f}%)<br>"
+                       f"Burn rate: ${r['burn_monthly']:,.0f}/mes<br>"
+                       f"Meses restantes: {r['months_remaining']:.1f}")
+                    + "<extra></extra>"
+                    for r in data_sorted[::-1]
+                ],
+            ))
+            max_pct = max(bar_pcts) if bar_pcts else 100
+            fig.update_layout(
+                **PLOTLY_LAYOUT,
+                title=title,
+                xaxis_title="% consumido" if not is_monthly else "% del ingreso mensual gastado",
+                yaxis_title="",
+                height=max(300, len(bar_names) * 45),
+                xaxis=dict(range=[0, max(max_pct + 10, 110)], ticksuffix="%"),
+            )
+            fig.update_layout(hovermode="closest")
+            fig.add_vline(x=60, line_dash="dot", line_color="#d97706", opacity=0.5, annotation_text="60%", annotation_position="top")
+            fig.add_vline(x=85, line_dash="dot", line_color="#dc2626", opacity=0.5, annotation_text="85%", annotation_position="top")
+            fig.add_vline(x=100, line_dash="dash", line_color="#0f172a", opacity=0.7, annotation_text="100%", annotation_position="top")
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+        # ── Charts ──
+        if proj_only:
+            _rentab_bar_chart(proj_only, "Contratos por proyecto: presupuesto consumido")
+        if monthly_only:
+            _rentab_bar_chart(monthly_only, "Contratos mensuales: gasto vs ingreso")
+
+        # ── Per-project detail cards ──
+        for r in rentab_data:
+            status_badge = {"activo": "🟢", "completado": "✅", "pausado": "⏸️"}.get(r["status"], "")
+            is_monthly = r.get("contract_type") == "mensual"
+            label_suffix = "/mes" if is_monthly else ""
+            with st.expander(f"{status_badge} **{r['name']}** — {r['client']}  |  {r['pct_used']:.0f}% consumido  |  Margen: {r['pct_margin']:.0f}%  {'(mensual)' if is_monthly else ''}"):
+                dc1, dc2, dc3, dc4 = st.columns(4)
+                if is_monthly:
+                    dc1.metric("Ingreso mensual", f"${r['contract']:,.0f}")
+                    dc2.metric("Gasto mensual", f"${r['burn_monthly']:,.0f}")
+                    dc3.metric("Margen mensual", f"${r['margin']:,.0f}", delta=f"{r['pct_margin']:.1f}%")
+                    dc4.metric("% costo/ingreso", f"{r['pct_used']:.1f}%")
+                else:
+                    dc1.metric("Contrato", f"${r['contract']:,.0f}")
+                    dc2.metric("Gastado total", f"${r['total_spent']:,.0f}")
+                    dc3.metric("Margen", f"${r['margin']:,.0f}", delta=f"{r['pct_margin']:.1f}%")
+                    dc4.metric("Burn rate", f"${r['burn_monthly']:,.0f}/mes",
+                               delta=f"{r['months_remaining']:.1f} meses rest." if r["months_remaining"] > 0 else "—")
+
+                # Currency info
+                if r["original_currency"] != "MXN":
+                    st.caption(f"Contrato original: {r['original_currency']}${r['original_amount']:,.0f}  |  TC: {r['exchange_rate']:.4f} {r['original_currency']}/MXN")
+
+                # Breakdown
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    if is_monthly:
+                        st.markdown(f"""
+| Concepto | Monto/mes |
+|:--|--:|
+| Ingreso contrato | ${r['contract']:,.0f} |
+| Gasto promedio | ${r['burn_monthly']:,.0f} |
+| **Margen mensual** | **${r['margin']:,.0f}** |
+| Margen objetivo | {r['target']:.0f}% |
+""")
+                    else:
+                        st.markdown(f"""
+| Concepto | Monto |
+|:--|--:|
+| Gasto pre-tracking (estimado) | ${r['est_before']:,.0f} |
+| Gasto tracked (timesheet) | ${r['tracked']:,.0f} |
+| **Total gastado** | **${r['total_spent']:,.0f}** |
+| Margen objetivo | {r['target']:.0f}% |
+""")
+
+                # Milestones
+                with bc2:
+                    if r["milestones"]:
+                        st.markdown("**Hitos de pago**")
+                        for m in r["milestones"]:
+                            paid_icon = "✅" if m.get("paid") else "⏳"
+                            st.markdown(f"- {paid_icon} {m['description']}: **${m.get('amount', 0):,.0f}** — {m.get('date', '')}")
+                        st.markdown(f"**Total facturado:** ${r['total_facturado']:,.0f}  |  **Cobrado:** ${r['total_cobrado']:,.0f}")
+
+    # ── Unconfigured projects reminder (always visible) ──
+    configured_names = {p["name"] for p in project_configs}
+    unconfigured_projs = [
+        (p, tracked_cost_by_project.get(p, 0), tracked_hours_by_project.get(p, 0))
+        for p in billable_projects_in_data if p not in configured_names
+    ]
+    if unconfigured_projs:
+        st.markdown("")
+        st.markdown("### Proyectos sin configurar")
+        st.caption("Estos proyectos tienen horas registradas pero no se han configurado para seguimiento de rentabilidad.")
+        uc_lines = []
+        for name, cost, hrs in sorted(unconfigured_projs, key=lambda x: -x[1]):
+            uc_lines.append(f"| {name} | ${cost:,.0f} | {hrs:,.2f} |")
+        st.markdown("| Proyecto | Costo tracked | Horas tracked |\n|:--|--:|--:|\n" + "\n".join(uc_lines))
