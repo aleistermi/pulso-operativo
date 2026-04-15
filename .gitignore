@@ -3,8 +3,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-data/*.json
-data/*.csv
+data/employees.json
+data/salaries.json
+data/timesheet_entries.csv
+data/timesheet_entries.json
 data/cron.log
 *.egg-info/
 dist/
