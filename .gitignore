@@ -5,8 +5,11 @@ __pycache__/
 venv/
 data/*.json
 data/*.csv
+data/cron.log
 *.egg-info/
 dist/
 build/
 .DS_Store
 .streamlit/
+Proyectos/
+nextjs-dashboard/
